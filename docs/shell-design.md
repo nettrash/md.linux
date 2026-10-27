@@ -264,9 +264,10 @@ selection in Split exactly as before, and the menu rows still show their chords.
 chord on Linux — registering the Delete key would take it from every entry.
 
 **While a dialog is up.** `adw::AlertDialog` is presented inside the window, so window shortcuts
-would still reach the window behind it. `AdwAlerts` sets the snapshot's `dialog_open` (a Linux field,
-§15) and every `win.` action is disabled until the dialog answers — the Mac's sheet blocks the
-window's menu items the same way.
+would still reach the window behind it. The snapshot's `dialog_open` (a Linux field, §15) is true
+while the window has a visible dialog (an alert, About), `AdwAlerts` is showing one or `GtkPickers`
+has a file dialog up (their `open_changed` events republish the snapshot), and every `win.` action
+is disabled until it answers — the Mac's sheet blocks the window's menu items the same way.
 
 **Escape** is not an accelerator (it would take Escape from input methods and popovers). A window
 `gtk::EventControllerKey` in the **bubble** phase exits Zen when nothing below handled the key; the
@@ -1037,7 +1038,10 @@ document carries no images.
 
 `services::AdwAlerts` (`seams::Alerts`) over `adw::AlertDialog::new(Some(title), Some(message))`,
 `add_response`, `set_response_appearance(.., ResponseAppearance::Destructive | Suggested)`,
-`set_default_response`, `set_close_response`, `choose_future(Some(&window))`; name prompts put a
+`set_default_response`, `set_close_response`, then `present(Some(&window))` and the `response` /
+`closed` signals — **never `choose_future`**: libadwaita-rs 0.9's trampoline asserts that
+`choose_finish` returned a string, a cancelled choice returns NULL, so dropping the future aborts
+the whole process; a caller that stops waiting closes the dialog instead. Name prompts put a
 `gtk::Entry` in `set_extra_child` (activates the default response). One at a time per window (a
 queue), and `dialog_open` in the snapshot while one is up (§2.2). Titles verbatim from
 `strings::exports` / `documents` / `books`.
