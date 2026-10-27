@@ -17,9 +17,6 @@
 //! `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS`; when someone else has (the Docker dev image), WebKit
 //! starts no sandbox and there is nothing to probe. `MD_SKIP_SANDBOX_PROBE=1` skips the probe in
 //! debug and self-test builds only — a release build ignores it.
-// P4 → P1 / P5: until the windows construct previews and exports, only the self-test reaches this;
-// removed at the integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::{Cell, OnceCell};
 use std::path::PathBuf;

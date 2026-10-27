@@ -39,6 +39,8 @@ const MINIMUM_HEIGHT: i32 = 160;
 
 /// The editor and preview of one window.
 pub struct ArticlePanes {
+    /// Whose panes these are — reported to the self-test; the panes behave the same for both.
+    #[cfg(feature = "selftest")]
     role: PanesRole,
     zen_bin: ZenBin,
     panes: gtk::Box,
@@ -88,7 +90,10 @@ impl ArticlePanes {
         let scroll_sync = Rc::new(ScrollSync::new());
         editor.attach_scroll_sync(&scroll_sync);
 
+        #[cfg(not(feature = "selftest"))]
+        let _ = role;
         let this = Rc::new(ArticlePanes {
+            #[cfg(feature = "selftest")]
             role,
             zen_bin,
             panes,
@@ -158,6 +163,7 @@ impl ArticlePanes {
         Rc::clone(&self.find_bar)
     }
 
+    #[cfg(feature = "selftest")]
     pub fn role(&self) -> PanesRole {
         self.role
     }
@@ -202,6 +208,7 @@ impl ArticlePanes {
         }
     }
 
+    #[cfg(feature = "selftest")]
     pub fn scroll_sync(&self) -> Rc<ScrollSync> {
         Rc::clone(&self.scroll_sync)
     }
@@ -212,16 +219,19 @@ impl ArticlePanes {
     }
 
     /// The arrangement applied now.
+    #[cfg(feature = "selftest")]
     pub fn layout(&self) -> PaneLayout {
         self.layout.get().unwrap_or(PaneLayout::SideBySide)
     }
 
     /// The editor column (find bar + editor) and the preview slot, for the self-test's geometry.
+    #[cfg(feature = "selftest")]
     pub fn columns(&self) -> (gtk::Widget, gtk::Widget) {
         (self.column.clone().upcast(), self.preview_slot.clone().upcast())
     }
 
     /// The Zen layout bin.
+    #[cfg(feature = "selftest")]
     pub fn zen_bin(&self) -> ZenBin {
         self.zen_bin.clone()
     }

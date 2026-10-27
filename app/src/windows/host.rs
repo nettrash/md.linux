@@ -19,12 +19,9 @@ pub enum WindowKind {
 }
 
 /// One md window as the shell sees it.
-#[allow(dead_code)] // S0 stub: removed at the integration gate (P1), once every method has its callers
 pub trait WindowHost {
     /// md-logic's id for this window, unique for the life of the process.
     fn id(&self) -> WindowId;
-
-    fn kind(&self) -> WindowKind;
 
     /// The toplevel (an `adw::ApplicationWindow`), for dialog parents and `present()`.
     fn window(&self) -> gtk::Window;
@@ -46,7 +43,4 @@ pub trait WindowHost {
 
     /// Recomputes the snapshot and refreshes the menus.
     fn publish(&self);
-
-    /// Whether the window currently shows the dark palette.
-    fn is_dark(&self) -> bool;
 }

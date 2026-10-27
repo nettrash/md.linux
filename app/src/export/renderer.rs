@@ -20,9 +20,6 @@
 //! - `pdf`: `pdf::print_to_file` into `$XDG_RUNTIME_DIR/md/<uuid>.pdf`, read back, deleted;
 //! - `close`: off the overlay, page forgotten, view dropped — also when the surface is dropped
 //!   unclosed.
-// P4 → P1 / P5: until the windows construct exports, only the self-test reaches this; removed at the
-// integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

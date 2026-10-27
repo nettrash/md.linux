@@ -11,7 +11,6 @@
 //! a failed write), and it confirms a replacement only for the name the user typed. When md
 //! appends the default extension to a bare name, the name it will write is a different one, so md
 //! asks about that one itself ([`Alerts::confirm_replace`]).
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -34,6 +33,11 @@ pub struct GtkPickers {
     /// Where the dialogs start: the document's folder (§6.1). `None` lets GTK choose.
     folder: RefCell<Option<String>>,
     open_changed: Rc<Event<bool>>,
+    /// Self-test builds: answers queued by the self-test, taken by the next dialog instead of
+    /// showing it — so a group can drive a whole flow (a book export into a file) through this
+    /// window's real pickers. GTK's dialogs themselves are proven by the `documents` group.
+    #[cfg(feature = "selftest")]
+    answers: RefCell<std::collections::VecDeque<Option<String>>>,
 }
 
 impl GtkPickers {
@@ -43,7 +47,22 @@ impl GtkPickers {
             alerts,
             folder: RefCell::new(None),
             open_changed: Rc::new(Event::new()),
+            #[cfg(feature = "selftest")]
+            answers: RefCell::new(std::collections::VecDeque::new()),
         })
+    }
+
+    /// Self-test builds: the next dialog of this window is answered with `answer` (a path, or
+    /// `None` for Cancel) without being shown; `open_changed` is raised around it as for a real one.
+    #[cfg(feature = "selftest")]
+    pub fn queue_answer(&self, answer: Option<&str>) {
+        self.answers.borrow_mut().push_back(answer.map(str::to_string));
+    }
+
+    /// The queued answer for this dialog, if the self-test left one.
+    #[cfg(feature = "selftest")]
+    fn queued(&self) -> Option<Option<String>> {
+        self.answers.borrow_mut().pop_front()
     }
 
     /// The folder every dialog of this window starts in — the document's own (§6.1: Save As starts
@@ -90,6 +109,10 @@ impl Pickers for GtkPickers {
     /// plus the Markdown and plain-text MIME types (§6.1). GTK hides the filter popup when there
     /// is only one.
     fn open_files(&self, extensions: Vec<String>) -> LocalBoxFuture<'static, Vec<String>> {
+        #[cfg(feature = "selftest")]
+        if let Some(answer) = self.queued() {
+            return Box::pin(self.bracketed(async move { answer.into_iter().collect() }));
+        }
         let dialog = self.file_dialog(None);
         if !extensions.is_empty() {
             let filters = gio::ListStore::new::<gtk::FileFilter>();
@@ -116,6 +139,11 @@ impl Pickers for GtkPickers {
         choices: Vec<FileTypeChoice>,
         default_extension: String,
     ) -> LocalBoxFuture<'static, Option<String>> {
+        #[cfg(feature = "selftest")]
+        if let Some(answer) = self.queued() {
+            let alerts = Rc::clone(&self.alerts);
+            return Box::pin(self.bracketed(async move { finish_save(alerts, answer?, default_extension).await }));
+        }
         let dialog = self.file_dialog(None);
         dialog.set_initial_name(Some(&suggested_name));
         if !choices.is_empty() {
@@ -139,6 +167,10 @@ impl Pickers for GtkPickers {
 
     /// `title` (a book or bundle prompt) is the dialog's title; GTK's own when `None`.
     fn pick_folder(&self, title: Option<String>) -> LocalBoxFuture<'static, Option<String>> {
+        #[cfg(feature = "selftest")]
+        if let Some(answer) = self.queued() {
+            return Box::pin(self.bracketed(async move { answer }));
+        }
         let dialog = self.file_dialog(title.as_deref());
         let picked = dialog.select_folder_future(Some(&self.window));
         Box::pin(self.bracketed(async move { local_path(&picked.await.ok()?) }))

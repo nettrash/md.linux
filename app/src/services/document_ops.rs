@@ -1,6 +1,6 @@
 //! Rename and Move To through `gio::File::move_` (shell-design §6.4) — it refuses an existing
-//! target and copies + deletes across file systems — and the TextBundle / TextPack import helpers
-//! (§6.5). Errors come back as the message an alert shows.
+//! target and copies + deletes across file systems — and how a file handed to md (`open`, a drop)
+//! becomes an activation item (§1.3, §6.5). Errors come back as the message an alert shows.
 //!
 //! [`rename`] and [`move_to`] are the file operations; [`rename_with_prompt`] and
 //! [`move_with_picker`] are md.win's whole `RenameAsync` / `MoveToAsync` around them — the prompt
@@ -8,19 +8,15 @@
 //! watcher, the alert on failure — and hand back the new path for the window to
 //! `TextFileSession::retarget` to (then recents and `apply_memory` follow from the session's
 //! `identity_changed`, §6.4).
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use gio::prelude::*;
 use md_core::book::book_folder;
 use md_logic::activation::ActivationItem;
-use md_logic::documents::document_loader::{self, DocumentKind, LoadedDocument};
 use md_logic::documents::{LocalFileIdentity, file_names};
 use md_logic::exec::LocalBoxFuture;
 use md_logic::seams::{Alerts, FileIdentity, Pickers};
 use md_logic::strings;
 use std::rc::Rc;
-
-use crate::services::file_system::StdFileSystem;
 
 /// Renames the file in its folder; the new path, or the message. `new_file_name` is a whole name
 /// (extension included — see [`renamed_file_name`]); one the Mac's rule refuses is
@@ -111,7 +107,7 @@ pub fn rename_with_prompt(
 
 /// File ▸ Move To…: the folder dialog, `flush`, then [`move_to`]. `Some(new path)` for the window
 /// to retarget to; `None` when cancelled, when the folder is the file's own, or after the alert
-/// (md.win's `COULD_NOT_RENAME`: the family has no move-specific title).
+/// (`COULD_NOT_MOVE`; md.win reused `COULD_NOT_RENAME`).
 pub fn move_with_picker(
     pickers: Rc<dyn Pickers>,
     alerts: Rc<dyn Alerts>,
@@ -125,31 +121,11 @@ pub fn move_with_picker(
             Ok(new_path) if new_path == path => None,
             Ok(new_path) => Some(new_path),
             Err(message) => {
-                alerts.warn(strings::documents::COULD_NOT_RENAME.to_string(), message).await;
+                alerts.warn(strings::documents::COULD_NOT_MOVE.to_string(), message).await;
                 None
             }
         }
     })
-}
-
-/// File ▸ Duplicate's window title (§6.4): `"{title} copy"` — the new untitled window holds the
-/// same text and is dirty from the start (so it gets a draft at once).
-pub fn duplicate_title(title: &str) -> String {
-    strings::duplicate_title(title)
-}
-
-/// A `.textpack` file or a `.textbundle` folder read for import (§6.5): its text, the encoding
-/// it was written in, and its title (the bundle's stem) — what
-/// `TextFileSession::import_bundle(path, text, encoding)` takes. The error is (alert title,
-/// message): `TEXT_PACK_UNREADABLE` for a bundle that is not one, `COULD_NOT_OPEN` with the
-/// system's message for one that cannot be read.
-pub fn import(path: &str) -> Result<LoadedDocument, (String, String)> {
-    let load = document_loader::load(path, &StdFileSystem::new());
-    match load.document {
-        Some(document) if document.kind != DocumentKind::PlainText => Ok(document),
-        Some(_) => Err((strings::documents::TEXT_PACK_UNREADABLE.to_string(), String::new())),
-        None => Err((load.alert_title().unwrap_or(strings::documents::COULD_NOT_OPEN).to_string(), load.error_text)),
-    }
 }
 
 /// One file handed to md by `open` or a drop, as md-logic's activation router classifies it
@@ -168,7 +144,6 @@ pub fn activation_item(file: &gio::File) -> Option<ActivationItem> {
 mod tests {
     use super::*;
     use crate::services::file_system::tests::TempFolder;
-    use md_core::export::text_bundle;
     use md_logic::exec::LocalExecutor;
     use md_logic::testing::{FakeAlerts, FakePickers};
     use std::cell::Cell;
@@ -313,33 +288,7 @@ mod tests {
         pickers.queue_folder_answer(Some(&temp.path("gone")));
         let moved = temp.path("archive/doc.md");
         assert_eq!(executor.block_on(move_with_picker(pickers, alerts.clone(), moved, || {})), None);
-        assert_eq!(alerts.warnings()[0].title, strings::documents::COULD_NOT_RENAME);
-    }
-
-    #[test]
-    fn imports_are_titled_after_the_bundle() {
-        let temp = TempFolder::new("import");
-        let wrapper = text_bundle::bundle_wrapper("# Field notes\n\nПривет.\n", Vec::new());
-        let pack = temp.path("Field Notes.textpack");
-        std::fs::write(&pack, wrapper.to_text_pack("Field Notes").unwrap()).unwrap();
-        let folder = temp.path("Trip.textbundle");
-        wrapper.write(std::path::Path::new(&folder)).unwrap();
-
-        let packed = import(&pack).expect("the pack imports");
-        assert_eq!(packed.kind, DocumentKind::TextPack);
-        assert_eq!(packed.title, "Field Notes");
-        assert_eq!(packed.text, "# Field notes\n\nПривет.\n");
-        let bundled = import(&folder).expect("the bundle imports");
-        assert_eq!(bundled.kind, DocumentKind::TextBundleFolder);
-        assert_eq!(bundled.title, "Trip");
-
-        let broken = temp.path("Broken.textpack");
-        std::fs::write(&broken, "not a zip").unwrap();
-        assert_eq!(import(&broken).unwrap_err().0, strings::documents::TEXT_PACK_UNREADABLE);
-        let plain = temp.path("plain.md");
-        std::fs::write(&plain, "text").unwrap();
-        assert_eq!(import(&plain).unwrap_err().0, strings::documents::TEXT_PACK_UNREADABLE);
-        assert_eq!(import(&temp.path("missing.textpack")).unwrap_err().0, strings::documents::COULD_NOT_OPEN);
+        assert_eq!(alerts.warnings()[0].title, strings::documents::COULD_NOT_MOVE);
     }
 
     #[test]
@@ -352,11 +301,5 @@ mod tests {
         assert_eq!(activation_item(&gio::File::for_path(&folder)), Some(ActivationItem::folder(&folder)));
         assert_eq!(activation_item(&gio::File::for_path(&file)), Some(ActivationItem::file(&file)));
         assert_eq!(activation_item(&gio::File::for_uri("https://example.com/x.md")), None);
-    }
-
-    #[test]
-    fn a_duplicate_is_titled_after_its_original() {
-        assert_eq!(duplicate_title("notes"), "notes copy");
-        assert_eq!(duplicate_title("Untitled 2"), "Untitled 2 copy");
     }
 }

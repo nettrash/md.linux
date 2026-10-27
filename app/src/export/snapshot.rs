@@ -13,9 +13,6 @@
 //!
 //! The spike proved the zoom-and-crop mechanism on a full-document texture (966 × 96 px for a
 //! 483 × 47.9 px formula, docs/linux-facts.md §6); the arithmetic is pure here and unit-tested.
-// P4 → P1 / P5: until the windows construct exports, only the self-test reaches this; removed at the
-// integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::time::Duration;
 

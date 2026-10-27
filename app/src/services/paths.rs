@@ -91,6 +91,27 @@ fn data_dir(overridden: Option<PathBuf>) -> PathBuf {
     }
 }
 
+/// `folder` with the home folder written `~` — how the header bar's subtitle and Open Recent's
+/// rows name a folder (shell-design §1.4, §6.6). Pure: `home` is passed in.
+pub fn tilde_folder(folder: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    if home.is_empty() {
+        return folder.to_string();
+    }
+    if folder == home {
+        return "~".to_string();
+    }
+    match folder.strip_prefix(home) {
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => folder.to_string(),
+    }
+}
+
+/// [`tilde_folder`] under this user's home folder.
+pub fn display_folder(folder: &str) -> String {
+    tilde_folder(folder, &glib::home_dir().to_string_lossy())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +148,19 @@ mod tests {
         assert_eq!(paths.session_file(), PathBuf::from("/h/.local/state/md/session.json"));
         assert_eq!(paths.drafts_dir(), PathBuf::from("/h/.local/share/md/drafts"));
         assert_eq!(paths.runtime_dir(), Path::new("/run/user/1000/md"));
+    }
+
+    #[test]
+    fn folders_under_home_are_written_with_a_tilde() {
+        const HOME: &str = "/home/me";
+        assert_eq!(tilde_folder("/home/me", HOME), "~");
+        assert_eq!(tilde_folder("/home/me", "/home/me/"), "~");
+        assert_eq!(tilde_folder("/home/me/Documents/Книги", HOME), "~/Documents/Книги");
+        assert_eq!(tilde_folder("/home/me/x", "/home/me/"), "~/x");
+        assert_eq!(tilde_folder("/home/meadow", HOME), "/home/meadow");
+        assert_eq!(tilde_folder("/srv/Book", HOME), "/srv/Book");
+        assert_eq!(tilde_folder("/srv/Book", ""), "/srv/Book");
+        let home = glib::home_dir().to_string_lossy().into_owned();
+        assert_eq!(display_folder(&format!("{home}/notes")), tilde_folder(&format!("{home}/notes"), &home));
     }
 }

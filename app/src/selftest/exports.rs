@@ -40,7 +40,7 @@ use crate::export::pdf::PrintOutcome;
 use crate::export::renderer;
 use crate::export::window_exports::WindowExports;
 use crate::selftest::Harness;
-use crate::windows::host::{WindowHost, WindowKind};
+use crate::windows::host::WindowHost;
 
 const TITLE: &str = "md self-test: exports";
 
@@ -61,10 +61,6 @@ struct TestHost {
 impl WindowHost for TestHost {
     fn id(&self) -> WindowId {
         WindowId(u64::MAX - 4)
-    }
-
-    fn kind(&self) -> WindowKind {
-        WindowKind::Document
     }
 
     fn window(&self) -> gtk::Window {
@@ -97,10 +93,6 @@ impl WindowHost for TestHost {
     }
 
     fn publish(&self) {}
-
-    fn is_dark(&self) -> bool {
-        false
-    }
 }
 
 struct Exports<'a> {
@@ -636,7 +628,7 @@ impl Exports<'_> {
             format!("{} bytes; alerts {:?}", text.len(), alerts.borrow()),
         );
 
-        let known = Self::toplevels();
+        let known = Harness::toplevels();
         let printing = output.print();
         let printed = Rc::new(Cell::new(false));
         let flag = Rc::clone(&printed);
@@ -644,7 +636,7 @@ impl Exports<'_> {
             printing.await;
             flag.set(true);
         }));
-        let dismissed = self.dismiss_print_dialog(known, "print-book-dialog").await;
+        let dismissed = h.dismiss_print_dialog(known, "print-book-dialog").await;
         let ended = h.wait_until(Duration::from_secs(30), || printed.get()).await;
         let outcomes = self.exports.print_outcomes();
         h.check(
@@ -740,53 +732,14 @@ impl Exports<'_> {
 
     // ── Print ─────────────────────────────────────────────────────────────────────────────────
 
-    /// Waits for GTK's print dialog (a new visible toplevel whose type names it), screenshots it as
-    /// `shot` and cancels it — Escape through xdotool when input is on, else `close()`. Returns the
-    /// dialog's type name and how it went, or `None` when no dialog appeared.
-    async fn dismiss_print_dialog(&self, known: Vec<gtk::Window>, shot: &str) -> Option<(String, &'static str)> {
-        let h = self.h;
-        let dialog = Rc::new(RefCell::new(None::<gtk::Window>));
-        let found = {
-            let dialog = Rc::clone(&dialog);
-            h.wait_until(Duration::from_secs(60), move || {
-                let fresh = gtk::Window::list_toplevels()
-                    .into_iter()
-                    .filter_map(|w| w.downcast::<gtk::Window>().ok())
-                    .find(|w| !known.contains(w) && w.is_visible() && w.type_().name().contains("Print"));
-                let found = fresh.is_some();
-                *dialog.borrow_mut() = fresh;
-                found
-            })
-            .await
-        };
-        let window = dialog.borrow().clone();
-        let window = window.filter(|_| found)?;
-        let kind = window.type_().name().to_string();
-        h.screenshot(shot).await;
-        let mut how = "Escape";
-        if !(h.focus(&window).await && h.key("Escape").await) {
-            how = "close()";
-            window.close();
-        }
-        if !h.wait_until(Duration::from_secs(5), || !window.is_visible()).await {
-            how = "close() after Escape";
-            window.close();
-        }
-        Some((kind, how))
-    }
-
-    fn toplevels() -> Vec<gtk::Window> {
-        gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast().ok()).collect()
-    }
-
     async fn print(&self, host: &Rc<dyn WindowHost>) {
         let h = self.h;
         let shell = h.shell();
         // As a window builds it.
         let exports = WindowExports::new(&shell, Rc::downgrade(host));
-        let known = Self::toplevels();
+        let known = Harness::toplevels();
         exports.print("# Print me\n\nOn paper, in Nimbus Mono PS.\n".to_string(), "Print me".to_string());
-        let dismissed = self.dismiss_print_dialog(known, "print-dialog").await;
+        let dismissed = h.dismiss_print_dialog(known, "print-dialog").await;
         let ended = self.settle().await;
         h.sleep(Duration::from_millis(300)).await;
         let outcomes = exports.print_outcomes();

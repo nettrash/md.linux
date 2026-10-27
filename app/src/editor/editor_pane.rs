@@ -166,16 +166,19 @@ impl EditorPane {
     }
 
     /// The `GtkTextView` itself — for focus checks, and for the self-test.
+    #[cfg(feature = "selftest")]
     pub fn text_view(&self) -> gtk::TextView {
         self.view.clone()
     }
 
     /// The placeholder label (visible only while the buffer is empty).
+    #[cfg(feature = "selftest")]
     pub fn placeholder(&self) -> gtk::Label {
         self.placeholder.clone()
     }
 
     /// The typing hooks, for the self-test's report (`TypingHooks::trace`).
+    #[cfg(feature = "selftest")]
     pub fn typing_hooks(&self) -> &TypingHooks {
         &self.hooks
     }
@@ -403,6 +406,7 @@ impl EditorPane {
     }
 
     /// Args: the scroll fraction (shell-design §3.5).
+    #[cfg(feature = "selftest")]
     pub fn scrolled(&self) -> &Event<f64> {
         &self.scrolled_event
     }

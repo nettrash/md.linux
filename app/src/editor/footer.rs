@@ -47,10 +47,12 @@ impl Footer {
     }
 
     /// The label's text, as shown.
+    #[cfg(feature = "selftest")]
     pub fn text(&self) -> String {
         self.label.text().to_string()
     }
 
+    #[cfg(feature = "selftest")]
     pub fn is_busy(&self) -> bool {
         self.spinner.is_visible()
     }

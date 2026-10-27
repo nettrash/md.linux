@@ -11,9 +11,6 @@
 //! md-logic abandons a request (a redirect, a refused length, the cap, the deadline): by dropping the
 //! future or the body. Dropping the body closes its stream, which closes the connection mid-transfer.
 //! The session has no cookie jar, no cache and no persistent HSTS store: nothing reaches the disk.
-// P4 → P1 / P5: until the windows construct exports, only the self-test reaches this; removed at the
-// integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use md_logic::exec::LocalBoxFuture;
 use md_logic::export::{CoverBody, CoverFetcher, CoverResponse};

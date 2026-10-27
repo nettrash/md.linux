@@ -14,7 +14,6 @@
 //! session lives — and every report is raised with no borrow held, so a handler may call
 //! [`FileWatcher::watch`] again (the session retargets from inside `renamed`). A `watch` or `stop`
 //! starts a new generation: timers armed for the previous target fire into nothing.
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};

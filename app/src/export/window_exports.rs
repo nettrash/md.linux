@@ -13,9 +13,6 @@
 //! Print hands md-logic's paper HTML to a Paper renderer and runs GTK's print dialog over it
 //! (`pdf::run_print_dialog`); the renderer stays in the overlay until the dialog — and any job it
 //! started — is over, then is closed. Failures are swallowed, as on the Mac.
-// P4 → P1 / P5: until the windows construct exports, only the self-test reaches this; removed at the
-// integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::rc::{Rc, Weak};
 

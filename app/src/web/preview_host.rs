@@ -23,9 +23,6 @@
 //!   own doing and "unresponsive" is never acted on.
 //!
 //! [`did_scroll`]: PreviewHost::did_scroll
-// P4 → P1 / P5: until the document window and the book pane construct previews, only the self-test
-// does; removed at the integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -143,6 +140,7 @@ impl PreviewHost {
 
     /// This surface's document URL, `md-asset://preview-<n>/index.html` — the coordinator's
     /// `index_url`.
+    #[cfg(feature = "selftest")]
     pub fn index_url(&self) -> &str {
         &self.index_url
     }

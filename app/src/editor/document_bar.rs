@@ -97,11 +97,13 @@ impl DocumentBar {
         *self.actions.borrow_mut() = (None, None);
     }
 
+    #[cfg(feature = "selftest")]
     pub fn is_shown(&self) -> bool {
         self.revealer.reveals_child()
     }
 
     /// The message and the button labels, as shown ("" for a hidden second button).
+    #[cfg(feature = "selftest")]
     pub fn texts(&self) -> (String, String, String) {
         let second = if self.second.is_visible() {
             self.second.label().map(|l| l.to_string()).unwrap_or_default()
@@ -112,6 +114,7 @@ impl DocumentBar {
     }
 
     /// Clicks the first (`true`) or the second button, as a pointer would.
+    #[cfg(feature = "selftest")]
     pub fn press(&self, first: bool) {
         if first {
             self.first.emit_clicked();

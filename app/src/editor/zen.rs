@@ -186,16 +186,19 @@ impl ZenCapsule {
     }
 
     /// Whether the capsule is up (shown, not faded).
+    #[cfg(feature = "selftest")]
     pub fn is_shown(&self) -> bool {
         self.revealer.is_visible() && self.revealer.reveals_child()
     }
 
     /// The capsule's revealer, for the self-test's geometry.
+    #[cfg(feature = "selftest")]
     pub fn widget(&self) -> gtk::Widget {
         self.revealer.clone().upcast()
     }
 
     /// The three switches as a pointer would press them: 0 write, 1 read, 2 exit.
+    #[cfg(feature = "selftest")]
     pub fn press(&self, which: usize) {
         match which {
             0 => self.write.emit_clicked(),

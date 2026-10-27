@@ -142,16 +142,19 @@ impl FindBar {
     }
 
     /// The query field (the self-test types into it).
+    #[cfg(feature = "selftest")]
     pub fn query_entry(&self) -> gtk::SearchEntry {
         self.query.clone()
     }
 
     /// The replacement field.
+    #[cfg(feature = "selftest")]
     pub fn replacement_entry(&self) -> gtk::Entry {
         self.replacement.clone()
     }
 
     /// "3 of 12", "No results", or "".
+    #[cfg(feature = "selftest")]
     pub fn tally_text(&self) -> String {
         self.tally.text().to_string()
     }

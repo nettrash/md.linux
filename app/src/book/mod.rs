@@ -19,7 +19,6 @@ pub mod sidebar;
 
 use std::rc::Rc;
 
-use md_logic::books::BookOutputs;
 use md_logic::seams::WindowId;
 
 use crate::app::Shell;
@@ -101,7 +100,12 @@ pub fn run_book_output(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>, 
             (window, exports)
         }
         (None, Some(invoking)) => {
-            let exports = WindowExports::new(shell, Rc::downgrade(&invoking));
+            // A document window renders it with its own exports, so the footer ring and the close
+            // wait follow it as for the window's own exports.
+            let exports = match shell.windows.document(invoking.id()) {
+                Some(window) => window.exports(),
+                None => WindowExports::new(shell, Rc::downgrade(&invoking)),
+            };
             (invoking, exports)
         }
         (None, None) => {
@@ -110,11 +114,7 @@ pub fn run_book_output(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>, 
             (window, exports)
         }
     };
-    let Some(sink) = book_sink(&exports) else {
-        eprintln!("md: book output skipped: the export renderer is not wired in this build (P4)");
-        return;
-    };
-    let output = shell.book.book_output(sink);
+    let output = shell.book.book_output(exports.book_outputs());
     let alerts = host.alerts();
     output.alert_requested().connect(move |(title, message): &(String, String)| {
         glib::spawn_future_local(alerts.warn(title.clone(), message.clone()));
@@ -126,22 +126,4 @@ pub fn run_book_output(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>, 
         BookOutputKind::LaTeX => output.export_latex(),
     };
     host.track_output(future);
-}
-
-/// Whether book outputs reach a renderer in this build (the self-test's question).
-#[cfg(feature = "selftest")]
-pub fn outputs_wired(shell: &Rc<Shell>) -> bool {
-    let exports = BookWindow::current().map(|window| window.exports());
-    let exports = exports.unwrap_or_else(|| WindowExports::new(shell, std::rc::Weak::<BookWindow>::new()));
-    book_sink(&exports).is_some()
-}
-
-/// The md-logic sink a book output renders into: the window's export pipeline.
-///
-/// MERGE (P4): `WindowExports::book_outputs()` returns the S0 stub's placeholder trait, not
-/// md-logic's `books::BookOutputs`; once P4's export half is in, this body is
-/// `Some(exports.book_outputs())`. Until then a book output stops here, before the flush.
-fn book_sink(exports: &WindowExports) -> Option<Rc<dyn BookOutputs>> {
-    let _placeholder = exports.book_outputs();
-    None
 }

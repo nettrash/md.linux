@@ -254,7 +254,6 @@ impl Harness {
 }
 
 /// The group-facing half of the harness: what the groups (P1–P5) drive the app with.
-#[allow(dead_code)] // S0 stub: removed at the integration gate (P1), once the groups use the harness
 impl Harness {
     /// The process's shell.
     pub fn shell(&self) -> Rc<Shell> {
@@ -378,6 +377,45 @@ impl Harness {
         let point = widget.compute_point(window, &gtk::graphene::Point::new(x as f32, y as f32))?;
         let (sx, sy) = window.surface_transform();
         Some(((wx + sx + f64::from(point.x())).round() as i32, (wy + sy + f64::from(point.y())).round() as i32))
+    }
+
+    /// Every toplevel GTK has now — to tell a dialog that appears later from what was there.
+    pub fn toplevels() -> Vec<gtk::Window> {
+        gtk::Window::list_toplevels().into_iter().filter_map(|w| w.downcast().ok()).collect()
+    }
+
+    /// Waits for GTK's print dialog (a new visible toplevel whose type names it), screenshots it as
+    /// `shot` and cancels it — Escape through xdotool when input is on, else `close()`. Returns the
+    /// dialog's type name and how it went, or `None` when no dialog appeared.
+    pub async fn dismiss_print_dialog(&self, known: Vec<gtk::Window>, shot: &str) -> Option<(String, &'static str)> {
+        let dialog = Rc::new(RefCell::new(None::<gtk::Window>));
+        let found = {
+            let dialog = Rc::clone(&dialog);
+            self.wait_until(Duration::from_secs(60), move || {
+                let fresh = gtk::Window::list_toplevels()
+                    .into_iter()
+                    .filter_map(|w| w.downcast::<gtk::Window>().ok())
+                    .find(|w| !known.contains(w) && w.is_visible() && w.type_().name().contains("Print"));
+                let found = fresh.is_some();
+                *dialog.borrow_mut() = fresh;
+                found
+            })
+            .await
+        };
+        let window = dialog.borrow().clone();
+        let window = window.filter(|_| found)?;
+        let kind = window.type_().name().to_string();
+        self.screenshot(shot).await;
+        let mut how = "Escape";
+        if !(self.focus(&window).await && self.key("Escape").await) {
+            how = "close()";
+            window.close();
+        }
+        if !self.wait_until(Duration::from_secs(5), || !window.is_visible()).await {
+            how = "close() after Escape";
+            window.close();
+        }
+        Some((kind, how))
     }
 
     /// `s` as a POSIX extended regular expression matching itself (xdotool's `--name`).

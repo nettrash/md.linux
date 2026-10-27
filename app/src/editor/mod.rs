@@ -12,8 +12,6 @@
 //! | [`document_bar`] | the conflict / save-error bar |
 //!
 //! Owner: P3.
-// The windows (P1, P5) construct these; until their merge only the self-test reaches them.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))] // P3: removed at the integration gate (P1)
 
 pub mod article_panes;
 pub mod document_bar;
