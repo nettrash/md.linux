@@ -18,9 +18,9 @@
 //! | [`FakePreviewSurface`] | [`PreviewSurface`] | `FakePreviewSurface.cs` |
 //! | [`FakeRenderSurface`], [`FakeRenderSurfaceFactory`] | [`RenderSurface`], [`RenderSurfaceFactory`] | `FakeRenderSurface.cs` |
 //! | [`FakeSettingsStore`] | [`SettingsStore`] | `FakeSettingsStore.cs` |
+//! | [`FakeTextBox`] | the editor the [`TypingHooks`](crate::text::TypingHooks) are fed from | `FakeTextBox.cs` |
 //!
-//! md.win's `FakeShare` has no counterpart (Linux has no share sheet), and `FakeTextBox` belongs
-//! with the typing hooks' port.
+//! md.win's `FakeShare` has no counterpart (Linux has no share sheet).
 //!
 //! How the fakes are shaped, once for all of them:
 //! - Every method takes `&self` (state in cells), so a test keeps an `Rc<FakeX>` for scripting and
@@ -52,6 +52,7 @@ mod fake_preview_surface;
 mod fake_render_surface;
 mod fake_scheduler;
 mod fake_settings_store;
+mod fake_text_box;
 mod fake_ui_thread;
 mod fake_word_counter;
 
@@ -67,6 +68,7 @@ pub use fake_preview_surface::FakePreviewSurface;
 pub use fake_render_surface::{FakeRenderSurface, FakeRenderSurfaceFactory};
 pub use fake_scheduler::FakeScheduler;
 pub use fake_settings_store::FakeSettingsStore;
+pub use fake_text_box::FakeTextBox;
 pub use fake_ui_thread::FakeUiThread;
 pub use fake_word_counter::FakeWordCounter;
 
