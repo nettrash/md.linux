@@ -589,7 +589,7 @@ pub fn format_label(v: f64) -> String {
         return format_fixed(v, 2);
     }
     let magnitude = v.abs();
-    if magnitude >= 1000.0 || magnitude < 0.01 {
+    if !(0.01..1000.0).contains(&magnitude) {
         return format_exponential(v, 1);
     }
     let rounded = round_ties_away(v);
