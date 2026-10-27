@@ -1,0 +1,18 @@
+Package: md
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: nettrash <nettrash@nettrash.me>
+Installed-Size: @INSTALLED_SIZE@
+Depends: @DEPENDS@
+Section: editors
+Priority: optional
+Homepage: https://nettrash.me/linux/md/support.html
+Description: Markdown editor and live previewer
+ md is a Markdown editor with a live preview beside the text: Edit, Split and
+ Preview layouts, Zen mode, find and replace, continued lists and
+ capitalized sentences, and a Format menu.
+ .
+ The preview draws KaTeX math with mhchem chemistry, Mermaid, Graphviz and
+ PlantUML diagrams and highlighted code with bundled open source engines,
+ and plots with none. Documents export to PDF, HTML, EPUB, LaTeX and
+ TextBundle; a folder of Markdown files can be written and compiled as a book.
