@@ -8,12 +8,20 @@
 //! | [`inflate`] | what `DeflateStream` does for `ZipReader.cs` |
 //! | [`text_bundle`] | `TextBundle.cs` (`TextBundle`, `BundleWrapper`) |
 //! | [`export_file_names`] | `ExportFileNames.cs` |
+//! | [`html_export`] | `HtmlExport.cs` |
+//! | [`pdf_export`] | `PdfExport.cs` |
+//! | [`diagram_svg`] | `DiagramSvg.cs` |
 
+pub mod diagram_svg;
 pub mod export_file_names;
+pub mod html_export;
 pub mod inflate;
+pub mod pdf_export;
 pub mod text_bundle;
 pub mod zip_reader;
 pub mod zip_writer;
 
+pub use diagram_svg::Diagram;
+pub use html_export::EmptyCapture;
 pub use text_bundle::{Asset, BundleWrapper, Rewrite};
 pub use zip_writer::{ZipEntry, ZipError, ZipWriter};
