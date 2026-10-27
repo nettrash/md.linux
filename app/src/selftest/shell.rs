@@ -1,27 +1,25 @@
 //! The `shell` self-test group (shell-design §13.3): app starts; one window; eight menus in order;
 //! every `CommandTable` row once with its title; accels as §2.9; ticks follow the snapshot; Quit
 //! keeps drafts and the relaunch restores them; a disabled action's chord reaches the focused
-//! widget; the dialog-open flag; the second-launch hand-off; `--version`; every live command wired.
-//!
-//! Checks that need another package's real code (P2's file system to open a saved document, P3's
-//! editor to type into) probe for it first and print `SKIP` with the reason while the package's S0
-//! stub is in; at the integration gate they run.
+//! widget; the dialog-open flag; the second-launch hand-off; `--version`; every command a document
+//! window or the Book window can enable wired there. The keystroke rows print `SKIP` with
+//! `--no-input`.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
-use md_core::book::article_file_system::FileStamp;
 use md_core::document::view_mode::ViewMode;
 use md_core::markdown::block::{NoteEntry, OutlineEntry};
 use md_logic::commands::{
-    ActionScope, CommandId, CommandKind, DiagramRef, MenuNode, RecentEntry, ShellSnapshot, WindowTitle,
-    command_enablement, command_table,
+    ActionScope, CommandDispatcher, CommandId, CommandKind, DiagramRef, MenuNode, RecentEntry, ShellSnapshot,
+    WindowTitle, command_enablement, command_table,
 };
-use md_logic::seams::{DocumentRegistry, FileSystem, WindowId};
+use md_logic::seams::{DocumentRegistry, WindowId};
 use md_logic::strings;
 
+use crate::book::book_window::BookWindow;
 use crate::menus::{accels, actions, menu_bar};
 use crate::selftest::Harness;
 use crate::windows::document_window::DocumentWindow;
@@ -71,6 +69,7 @@ pub async fn run(h: &Harness) {
     check_menus(h, &first);
     check_accelerators(h);
     check_wiring(h, &first);
+    check_book_wiring(h).await;
     h.screenshot("one-window").await;
     open_file_menu(h, &first).await;
 
@@ -283,19 +282,59 @@ fn check_wiring(h: &Harness, window: &DocumentWindow) {
         ..ShellSnapshot::empty()
     };
     let plain = ShellSnapshot { zen_active: false, ..rich.clone() };
-    let wired = window.wired();
-    let missing: Vec<String> = CommandId::ALL
+    report_wiring(h, "document_commands_wired", &window.dispatcher(), &[rich, plain]);
+}
+
+/// Every `win.` command the Book window can enable — with an article open, a book, a stepper that
+/// moves both ways, the sidebar shown or hidden — has a handler on its dispatcher.
+async fn check_book_wiring(h: &Harness) {
+    let shell = h.shell();
+    let open_before = BookWindow::current().is_some();
+    let book = BookWindow::show(&shell);
+    let rich = ShellSnapshot {
+        is_book_window: true,
+        is_editing_article: true,
+        is_dirty: true,
+        has_book: true,
+        outline: vec![OutlineEntry::new(1, "A", "a", 0)],
+        notes: vec![NoteEntry::new("n", 1)],
+        diagrams: vec![DiagramRef::new(0, "Mermaid")],
+        can_previous: true,
+        can_next: true,
+        editor_visible: true,
+        can_undo: true,
+        can_redo: true,
+        recent_entries: vec![RecentEntry::new("t", "n", "f")],
+        window_titles: vec![WindowTitle::new(WindowId(0), "Book", true)],
+        has_selection: true,
+        has_find_query: true,
+        find_bar_open: true,
+        sidebar_open: true,
+        ..ShellSnapshot::empty()
+    };
+    let hidden = ShellSnapshot { sidebar_open: false, ..rich.clone() };
+    report_wiring(h, "book_commands_wired", &book.dispatcher(), &[rich, hidden]);
+    if !open_before {
+        book.request_close();
+        drop(book);
+        h.wait_until(Duration::from_secs(10), || BookWindow::current().is_none()).await;
+    }
+}
+
+/// The `win.` commands any of `snapshots` enables that `dispatcher` has no handler for.
+fn report_wiring(h: &Harness, row: &str, dispatcher: &CommandDispatcher, snapshots: &[ShellSnapshot]) {
+    let live: Vec<CommandId> = CommandId::ALL
         .into_iter()
         .filter(|id| id.scope() == ActionScope::Window)
-        .filter(|id| command_enablement::is_enabled(*id, &rich) || command_enablement::is_enabled(*id, &plain))
-        .filter(|id| !wired.contains(id))
-        .map(|id| format!("{id:?}"))
+        .filter(|id| snapshots.iter().any(|s| command_enablement::is_enabled(*id, s)))
         .collect();
+    let missing: Vec<String> =
+        live.iter().filter(|id| !dispatcher.is_wired(**id)).map(|id| format!("{id:?}")).collect();
     h.check(
-        "document_commands_wired",
-        missing.is_empty(),
+        row,
+        missing.is_empty() && !live.is_empty(),
         if missing.is_empty() {
-            format!("{} handlers", wired.len())
+            format!("{} live commands, every one wired", live.len())
         } else {
             format!("no handler: {}", missing.join(", "))
         },
@@ -515,28 +554,22 @@ async fn check_chords(h: &Harness, a: &Rc<DocumentWindow>) {
         seen.iter().all(|(_, got, want)| got == want),
         seen.iter().map(|(c, got, _)| format!("{c} → {got:?}")).collect::<Vec<_>>().join(", "),
     );
+    // Ctrl+Z in Preview leaves the editor's text alone.
     let probe = a.editor();
-    probe.set_text("probe");
-    if probe.text() != "probe" {
-        skip("ctrl_z_in_preview_and_find_field", "blocked by P3's EditorPane stub (no text round trip)");
-    } else {
-        probe.set_text("");
-        // The editor is real: Ctrl+Z in Preview leaves its text alone.
-        probe.set_text("one");
-        activate(a, "view-mode", Some("preview".to_variant()));
-        h.sleep(BETWEEN).await;
-        h.key("ctrl+z").await;
-        let kept = probe.text() == "one";
-        activate(a, "view-mode", Some("split".to_variant()));
-        h.sleep(BETWEEN).await;
-        h.check("ctrl_z_in_preview_does_nothing", kept, format!("editor text {:?}", probe.text()));
-        probe.set_text("");
-    }
+    probe.set_text("one");
+    activate(a, "view-mode", Some("preview".to_variant()));
+    h.sleep(BETWEEN).await;
+    h.key("ctrl+z").await;
+    let kept = probe.text() == "one";
+    activate(a, "view-mode", Some("split".to_variant()));
+    h.sleep(BETWEEN).await;
+    h.check("ctrl_z_in_preview_does_nothing", kept, format!("editor text {:?}", probe.text()));
+    probe.set_text("");
 }
 
 // ---- Quit, drafts, relaunch, hand-off ---------------------------------------------------------------
 
-/// A saved document for the restore check — only when P2's file system is in.
+/// A saved document for the restore check.
 async fn open_saved_document(h: &Harness) -> Option<PathBuf> {
     let shell = h.shell();
     let path = h.out().join("restore-me.md");
@@ -544,11 +577,6 @@ async fn open_saved_document(h: &Harness) -> Option<PathBuf> {
         return None;
     }
     let text = path.to_string_lossy().into_owned();
-    let stamp: Option<FileStamp> = shell.files.stamp(&text);
-    if !shell.files.file_exists(&text) || stamp.is_none() {
-        skip("plain_launch_restores_saved_documents", "blocked by P2's StdFileSystem stub (no file is seen)");
-        return None;
-    }
     let id = shell.windows.open_path(&text)?;
     h.sleep(Duration::from_millis(500)).await;
     let window = shell.windows.documents().into_iter().find(|w| w.id() == id)?;
@@ -715,10 +743,7 @@ async fn check_relaunch(h: &Harness, draft: &Path, saved: Option<&PathBuf>) {
             "Focus",
         );
     } else {
-        skip(
-            "second_open_focuses_the_window",
-            "blocked by P2's StdFileSystem stub (the handed-over file did not open)",
-        );
+        h.check("second_open_focuses_the_window", false, "the handed-over file did not open in the primary");
     }
 
     // Quit in the primary: Ctrl+Q asks nothing, and the session still names the draft.
@@ -804,11 +829,7 @@ async fn check_close_policy(h: &Harness, clean: &Rc<DocumentWindow>, draft: Opti
     let kept = draft.is_none_or(|p| p.is_file());
     h.check(
         "dirty_untitled_close_cancelled_keeps_it",
-        still_open && kept,
-        format!(
-            "asked {}; still open {still_open}, draft kept {kept}{}",
-            asked.is_some(),
-            if asked.is_none() { " (P2's AdwAlerts stub answers Cancel at once)" } else { "" }
-        ),
+        asked.is_some() && still_open && kept,
+        format!("asked {}; still open {still_open}, draft kept {kept}", asked.is_some()),
     );
 }

@@ -17,8 +17,6 @@
 //! on deactivation and at Quit, deleted on Save / Save As and on Don't Save.
 
 use std::cell::{Cell, RefCell};
-#[cfg(feature = "selftest")]
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
@@ -126,9 +124,6 @@ pub struct DocumentWindow {
     zen: Rc<ZenController>,
     derived: Rc<DerivedTextScheduler>,
     dispatcher: Rc<CommandDispatcher>,
-    /// Every command this window registered a handler for (the integration gate's rule).
-    #[cfg(feature = "selftest")]
-    wired: RefCell<HashSet<CommandId>>,
     /// The `UntitledNames` ordinal this window holds while it is "Untitled N".
     untitled: Cell<Option<usize>>,
     draft: RefCell<Option<PathBuf>>,
@@ -246,8 +241,6 @@ impl DocumentWindow {
                 zen,
                 derived,
                 dispatcher,
-                #[cfg(feature = "selftest")]
-                wired: RefCell::new(HashSet::new()),
                 untitled: Cell::new(None),
                 draft: RefCell::new(None),
                 draft_timer: RefCell::new(None),
@@ -455,8 +448,6 @@ impl DocumentWindow {
                 run(&w);
             }
         });
-        #[cfg(feature = "selftest")]
-        self.wired.borrow_mut().insert(id);
     }
 
     fn handle_with(&self, id: CommandId, run: impl Fn(&Rc<DocumentWindow>, &CommandArgument) + 'static) {
@@ -466,8 +457,6 @@ impl DocumentWindow {
                 run(&w, argument);
             }
         });
-        #[cfg(feature = "selftest")]
-        self.wired.borrow_mut().insert(id);
     }
 
     fn register_handlers(&self) {
@@ -1180,10 +1169,10 @@ impl DocumentWindow {
         }
     }
 
-    /// Commands this window registered a handler for.
+    /// The window's dispatcher (the self-test asks it what is wired).
     #[cfg(feature = "selftest")]
-    pub fn wired(&self) -> HashSet<CommandId> {
-        self.wired.borrow().clone()
+    pub fn dispatcher(&self) -> Rc<CommandDispatcher> {
+        Rc::clone(&self.dispatcher)
     }
 
     /// The stored mode and Zen, as `session.json` would record them.

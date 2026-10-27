@@ -954,6 +954,9 @@ impl BookWindow {
                 book.panes.find_bar().show_replace();
             }),
         );
+        // Escape from anywhere in the window (its key controller, §2.2) closes an open find bar; the
+        // Book window has no Zen to leave.
+        d.register(CommandId::Escape, on(|book| book.panes.find_bar().close()));
         d.register(CommandId::FindNext, on(|book| book.panes.find_bar().find_next(true)));
         d.register(CommandId::FindPrevious, on(|book| book.panes.find_bar().find_next(false)));
         d.register(CommandId::UseSelectionForFind, on(|book| book.panes.find_bar().use_selection()));
