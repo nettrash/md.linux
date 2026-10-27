@@ -88,10 +88,6 @@ struct Outputs {
 }
 
 impl Outputs {
-    #[expect(
-        dead_code,
-        reason = "reached through WindowHost::track_output, which P4's WindowExports calls; its S0 stub does not"
-    )]
     fn track(self: &Rc<Self>, output: LocalBoxFuture<'static, ()>) -> LocalBoxFuture<'static, ()> {
         self.running.set(self.running.get() + 1);
         let me = Rc::clone(self);
