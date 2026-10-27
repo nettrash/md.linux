@@ -20,5 +20,11 @@ webkit = { package = "webkit6", version = "0.6", features = ["v2_52"] }
 glib = { version = "0.22", features = ["v2_88"] }
 gio = { version = "0.22", features = ["v2_88"] }
 
+[features]
+# `md --selftest OUT`: the in-app self-test of docs/shell-design.md §13 (runner, report.json,
+# xdotool input, screenshots). `scripts/dev.sh selftest` builds with it; the .deb never does, so a
+# shipped binary answers `--selftest` with GLib's "Unknown option".
+selftest = []
+
 [lints]
 workspace = true

@@ -1,37 +1,29 @@
-//! The `md-asset:` origin: `md-asset://<surface>/index.html` is served from memory and
-//! `md-asset://<surface>/rich/…` from the bundled engines, so the generated HTML's relative
-//! `rich/…` references, `import('./plantuml.js')` inside md-init.js and `url(fonts/…)` inside
-//! katex.min.css all resolve unchanged — the md.win `https://md.assets/` design on WebKitGTK.
+//! The `md-asset:` origin (shell-design §4.2): `md-asset://<host>/index.html` is served from memory
+//! and `md-asset://<host>/rich/…` from the bundled engines, so the generated HTML's relative `rich/…`
+//! references, `import('./plantuml.js')` inside md-init.js and `url(fonts/…)` inside katex.min.css
+//! all resolve unchanged — md.win's `https://md.assets/` design on WebKitGTK.
 //!
-//! Each surface (a document's preview, an export renderer) gets its own host name, which is
-//! also its own origin; the handler looks the page up by host.
+//! Each surface (a document's preview, an export renderer) gets its own host name, which is also
+//! its own origin; the handler looks the page up by host.
+//!
+//! S0 moved the spike's `assets.rs` here as the starting point (docs/linux-facts.md §3): the probe's
+//! registration switches are gone (secure + CORS is what was measured to work); the CSP header is
+//! sent on `index.html` as the design says.
+#![allow(dead_code, unused_variables)] // S0 stub: removed by P4
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 pub const SCHEME: &str = "md-asset";
 
-/// The Content-Security-Policy the spike tried on every response (see docs/linux-facts.md §3):
-/// no `'unsafe-inline'`, so `javascript:` URLs and inline handlers are blocked by the engine.
+/// The Content-Security-Policy on every `index.html` (facts §3): no `'unsafe-inline'` for scripts,
+/// so `javascript:` URLs and inline handlers are blocked by the engine.
 pub const CSP: &str = "default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; \
      style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:";
 
-/// How the scheme is registered with the context's `WebKitSecurityManager`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SchemeSecurity {
-    pub secure: bool,
-    pub cors: bool,
-    pub local: bool,
-    pub csp: bool,
-}
-
-impl SchemeSecurity {
-    /// What the real shell should use (measured: docs/linux-facts.md §3).
-    pub const SHELL: SchemeSecurity = SchemeSecurity { secure: true, cors: true, local: false, csp: false };
-}
-
+/// One answered request, for the self-test.
 #[derive(Debug)]
 pub struct Served {
     pub path: String,
@@ -43,30 +35,11 @@ pub struct AssetHost {
     rich_dir: PathBuf,
     pages: RefCell<HashMap<String, String>>,
     log: RefCell<Vec<Served>>,
-    csp: std::cell::Cell<bool>,
 }
 
 impl AssetHost {
     pub fn new(rich_dir: PathBuf) -> Rc<AssetHost> {
-        Rc::new(AssetHost {
-            rich_dir,
-            pages: RefCell::new(HashMap::new()),
-            log: RefCell::new(Vec::new()),
-            csp: std::cell::Cell::new(false),
-        })
-    }
-
-    /// `/usr/share/md/rich` in the .deb; `MD_RICH_DIR` overrides; the source tree's `rich/` in
-    /// a development build.
-    pub fn default_rich_dir() -> PathBuf {
-        if let Some(dir) = std::env::var_os("MD_RICH_DIR") {
-            return PathBuf::from(dir);
-        }
-        let installed = Path::new("/usr/share/md/rich");
-        if installed.is_dir() {
-            return installed.to_path_buf();
-        }
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rich")
+        Rc::new(AssetHost { rich_dir, pages: RefCell::new(HashMap::new()), log: RefCell::new(Vec::new()) })
     }
 
     pub fn index_url(host: &str) -> String {
@@ -81,33 +54,33 @@ impl AssetHost {
         std::mem::take(&mut *self.log.borrow_mut())
     }
 
-    pub fn set_csp(&self, on: bool) {
-        self.csp.set(on);
-    }
-
-    /// Registers the scheme on `ctx` (once per context) and its security flags.
-    pub fn attach(self: &Rc<Self>, ctx: &webkit::WebContext, security: SchemeSecurity) {
+    /// Registers the scheme on `ctx` (once per process) as secure and CORS-enabled — never as
+    /// local, which breaks the module scripts (facts §3).
+    pub fn attach(self: &Rc<Self>, ctx: &webkit::WebContext) {
         let host = Rc::clone(self);
         ctx.register_uri_scheme(SCHEME, move |req| host.serve(req));
         if let Some(sm) = ctx.security_manager() {
-            if security.secure {
-                sm.register_uri_scheme_as_secure(SCHEME);
-            }
-            if security.cors {
-                sm.register_uri_scheme_as_cors_enabled(SCHEME);
-            }
-            if security.local {
-                sm.register_uri_scheme_as_local(SCHEME);
-            }
+            sm.register_uri_scheme_as_secure(SCHEME);
+            sm.register_uri_scheme_as_cors_enabled(SCHEME);
         }
-        self.csp.set(security.csp);
+    }
+
+    /// A file under `rich/`, contained.
+    pub fn read_rich(&self, rel: &str) -> Option<Vec<u8>> {
+        if !is_contained(rel) {
+            return None;
+        }
+        std::fs::read(self.rich_dir.join(rel)).ok()
     }
 
     fn serve(&self, req: &webkit::URISchemeRequest) {
         let uri = req.uri().map(|u| u.to_string()).unwrap_or_default();
-        let (status, mime, body) = match split_uri(&uri) {
-            Some((host, path)) => self.resolve(host, path),
-            None => (404, "text/plain", Vec::new()),
+        let (status, mime, body, is_index) = match split_uri(&uri) {
+            Some((host, path)) => {
+                let (status, mime, body) = self.resolve(host, path);
+                (status, mime, body, path == "index.html")
+            }
+            None => (404, "text/plain", Vec::new(), false),
         };
         self.log.borrow_mut().push(Served { path: uri, status, mime });
         let bytes = glib::Bytes::from_owned(body);
@@ -118,7 +91,7 @@ impl AssetHost {
         response.set_content_type(mime);
         let headers = webkit::soup::MessageHeaders::new(webkit::soup::MessageHeadersType::Response);
         headers.append("Cache-Control", "no-store");
-        if self.csp.get() {
+        if is_index {
             headers.append("Content-Security-Policy", CSP);
         }
         response.set_http_headers(headers);
@@ -135,12 +108,9 @@ impl AssetHost {
         let Some(rest) = path.strip_prefix("rich/") else {
             return (404, "text/plain", Vec::new());
         };
-        if !is_contained(rest) {
-            return (404, "text/plain", Vec::new());
-        }
-        match std::fs::read(self.rich_dir.join(rest)) {
-            Ok(bytes) => (200, mime_for(rest), bytes),
-            Err(_) => (404, "text/plain", Vec::new()),
+        match self.read_rich(rest) {
+            Some(bytes) => (200, mime_for(rest), bytes),
+            None => (404, "text/plain", Vec::new()),
         }
     }
 }
@@ -155,15 +125,15 @@ pub fn split_uri(uri: &str) -> Option<(&str, &str)> {
 }
 
 /// A relative path stays inside `rich/`: no empty, `.` or `..` segment, no backslash, no
-/// percent-escape (none of the engines' files needs one).
+/// percent-escape (none of the engines' files needs one), no NUL.
 pub fn is_contained(rel: &str) -> bool {
     !rel.is_empty()
         && !rel.contains(['\\', '%', '\0'])
         && rel.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
-/// The Mac's MIME table (md.win `AssetMime`): WebKit sniffs nothing for a custom scheme, and
-/// a module script with the wrong type is refused.
+/// The Mac's MIME table (md.win `AssetMime`; md-logic `preview::asset_mime` is the shell's source):
+/// WebKit sniffs nothing for a custom scheme, and a module script with the wrong type is refused.
 pub fn mime_for(path: &str) -> &'static str {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
@@ -199,6 +169,7 @@ mod tests {
         assert!(!is_contained("fonts/../../x"));
         assert!(!is_contained("fonts//x"));
         assert!(!is_contained("%2e%2e/x"));
+        assert!(!is_contained("a\0b"));
         assert!(!is_contained(""));
     }
 
