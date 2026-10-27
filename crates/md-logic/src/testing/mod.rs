@@ -19,6 +19,7 @@
 //! | [`FakeRenderSurface`], [`FakeRenderSurfaceFactory`] | [`RenderSurface`], [`RenderSurfaceFactory`] | `FakeRenderSurface.cs` |
 //! | [`FakeSettingsStore`] | [`SettingsStore`] | `FakeSettingsStore.cs` |
 //! | [`FakeTextBox`] | the editor the [`TypingHooks`](crate::text::TypingHooks) are fed from | `FakeTextBox.cs` |
+//! | [`FakeCoverFetcher`] | [`CoverFetcher`](crate::export::CoverFetcher) | (md.win's tests replace `fetchCover` whole) |
 //!
 //! md.win's `FakeShare` has no counterpart (Linux has no share sheet).
 //!
@@ -43,6 +44,7 @@
 mod answer_queue;
 mod fake_alerts;
 mod fake_clock;
+mod fake_cover_fetcher;
 mod fake_document_registry;
 mod fake_file_identity;
 mod fake_file_system;
@@ -59,6 +61,7 @@ mod fake_word_counter;
 pub use answer_queue::{AnswerQueue, Scripted};
 pub use fake_alerts::{Confirmation, FakeAlerts, NamePrompt, Warning};
 pub use fake_clock::FakeClock;
+pub use fake_cover_fetcher::{FakeCoverAnswer, FakeCoverFetcher};
 pub use fake_document_registry::FakeDocumentRegistry;
 pub use fake_file_identity::FakeFileIdentity;
 pub use fake_file_system::FakeFileSystem;
