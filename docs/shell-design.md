@@ -481,14 +481,26 @@ them exactly what md.win's `EditorPane` feeds them, taken at GTK's natural bound
 | **Settings** | `use_settings(store)`; `SettingsStore::changed` | `hooks.configure(TypingSettings::read(store))`, wrap = `wrap_selection_setting::read(store)`; live in every window |
 
 Why boundaries and not per-signal hooks: GTK's typing over a selection is *two* buffer edits
-(`delete_selection` then `insert_interactive_at_cursor`) inside one user action, and the retype rule
-("a lowercase letter typed over its own capital stays lowercase") and the wrap both need them as one
-replacement — exactly what md.win's `BeforeTextChanging` sees. Reading the text twice per keystroke
-is md.win's cost too (`TextBox.Text`).
+(`delete_selection` then `insert_interactive_at_cursor`), and the retype rule ("a lowercase letter
+typed over its own capital stays lowercase") and the wrap both need them as one replacement —
+exactly what md.win's `BeforeTextChanging` sees. Reading the text twice per keystroke is md.win's
+cost too (`TextBox.Text`).
 
-**Undo units** (smart-typing.md §3.5, formatting.md §4): the typed letter is GTK's typing step; the
-capital (or the wrap) is a separate group of a delete and an insert, so one Ctrl+Z restores `m` from
-`M` (or `*` from `*word*`), a second removes it. That GtkTextHistory never merges the group into the
+**The bridge.** Over a selection longer than one scalar GTK 4.22 even puts the two edits in *two*
+user actions (`gtk_text_view_commit_text`: "so that there are two undo operations"), which would
+make the typed replacement two undo steps where the Mac and md.win have one — undoing a wrap would
+take three Ctrl+Z instead of two. So a user action that removed exactly its selection is held, and
+the pane begins an outermost user action of its own **inside** that action's `end-user-action`
+handler — before `GtkTextBuffer` hands the end to GtkTextHistory, whose group therefore stays open.
+GTK's insertion lands in it as an inner action; the next `Priority::HIGH` idle (before any further
+input) ends it. One history group, one undo step, one replacement for the hooks; a deletion nothing
+follows (Delete or Cut over a selection) closes the same way on its own. The self-test's wrap row
+proves Ctrl+Z ×2 back to the selected word and Shift+Ctrl+Z ×2 forward again.
+
+**Undo units** (smart-typing.md §3.5, formatting.md §4): the typed letter is GTK's typing step (a
+typed replacement of a selection one step, through the bridge above); the capital (or the wrap) is
+a separate group of a delete and an insert, so one Ctrl+Z restores `m` from `M` (or `*` from
+`*word*`), a second removes it (or brings `word` back, selected). That GtkTextHistory never merges the group into the
 preceding typing run is asserted by the self-test's keystroke tier (§13.3), not assumed.
 
 **External text** (open, Revert, Reload from Disk, an example, an article switch):
