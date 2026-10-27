@@ -15,13 +15,14 @@
 #   2. exports the source from git — HEAD itself when the tree is clean, else (--allow-dirty) the
 #      tracked and untracked-but-not-ignored files — so nothing stray (a .DS_Store in examples/)
 #      can reach the package;
-#   3. in md-linux-dev:<arch>: cargo build --release --locked -p md, stages docs/packaging.md §1,
-#      computes Depends (§8.1) and the control data, builds dist/md_<version>_<arch>.deb with
-#      dpkg-deb and checks its info and contents against §1;
+#   3. in md-linux-dev:<arch>: cargo build --release --locked -p md, stages docs/packaging.md §1
+#      in a volume and computes Depends (§8.1) and the control data; then, in md-linux-dev of the
+#      machine's own architecture, builds dist/md_<version>_<arch>.deb with dpkg-deb and checks
+#      its info and contents against §1 (see deb_inside for why dpkg-deb runs natively);
 #   4. in a fresh ubuntu:26.04 of the same architecture (§9.3): apt installs the .deb from the
 #      live archive, runs md --version, the MIME mapping of every extension, desktop-file-validate,
-#      appstreamcli validate --no-net, an AppArmor parse of the profile, lintian, then apt remove
-#      and purge, and a reinstall.
+#      appstreamcli validate --no-net, an AppArmor parse of the profile, then apt remove and purge,
+#      and a reinstall; and lintian, in a throwaway ubuntu:26.04 of the machine's own architecture.
 #
 # The package's SOURCE_DATE_EPOCH is the commit time of HEAD.
 #
@@ -77,7 +78,9 @@ build_inside() {
     local bin="${CARGO_TARGET_DIR:-/target}/release/md"
     if readelf -S "$bin" | grep -qE '\.(symtab|debug_[a-z]+)'; then die "the binary is not stripped"; fi
 
-    stage="$(mktemp -d /tmp/md-stage.XXXXXX)"
+    stage=/stage/tree
+    rm -rf "$stage"
+    mkdir -p "$stage"
     install -D -m 0755 "$bin" "$stage/usr/bin/md"
     # What dh_strip also removes: the compilers' .comment and the .note section.
     strip --remove-section=.comment --remove-section=.note "$stage/usr/bin/md"
@@ -128,15 +131,29 @@ build_inside() {
     chmod 0644 "$stage/DEBIAN/control" "$stage/DEBIAN/conffiles" "$stage/DEBIAN/md5sums"
 
     find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+    printf '%s\n' "$depends" > /stage/depends
+    say "staged for $arch"
+}
 
-    out=/out
+# In md-linux-dev of the machine's own architecture: the .deb from the staged tree, and its
+# layout check. dpkg-deb runs natively because under Docker Desktop's Rosetta emulation GNU tar
+# cannot stat a path given by name (`Cannot stat: Function not implemented`), and dpkg-deb always
+# names its files to tar; what dpkg-deb writes depends on its version and its input, not on the
+# processor it runs on, and both images carry the same dpkg from the same snapshot.
+deb_inside() {
+    local arch="$1" version stage=/stage/tree out=/out deb depends
+    cd /src
+    version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+    [ -f "$stage/DEBIAN/control" ] || die "nothing staged for $arch"
+    grep -qx "Architecture: $arch" "$stage/DEBIAN/control" || die "the staged tree is not $arch"
+    depends="$(cat /stage/depends)"
     deb="$out/${PKG}_${version}_${arch}.deb"
     rm -f "$deb"
     # One xz thread: liblzma's multi-threaded output is laid out in blocks, so the bytes would
     # depend on how many CPUs the building machine has.
     dpkg-deb --root-owner-group --threads-max=1 -Zxz -z9 --build "$stage" "$deb" >/dev/null
     check_layout "$deb" "$version" "$arch" "$depends"
-    rm -rf "$stage"
+    rm -rf "$stage" /stage/depends
     say "built $(basename "$deb"): $(stat -c %s "$deb") bytes"
     (cd "$out" && sha256sum "$(basename "$deb")")
 }
@@ -168,7 +185,12 @@ compute_depends() {
     printf '%s\n' "Source: $PKG" "" "Package: $PKG" "Architecture: any" > "$scratch/debian/control"
     shlibs="$(cd "$scratch" && dpkg-shlibdeps -O -e"$bin" 2>"$scratch/warnings")" ||
         { cat "$scratch/warnings" >&2; die "dpkg-shlibdeps failed"; }
-    if [ -s "$scratch/warnings" ]; then sed 's/^/package: dpkg-shlibdeps: /' "$scratch/warnings" >&2; fi
+    # On amd64, Ubuntu's usr-merge diverts /lib64/ld-linux-x86-64.so.2, so dpkg-shlibdeps warns
+    # that diversions are involved and, unable to attribute symbols through the diverted loader,
+    # that linking it is useless. libc6 provides the loader and is in Depends either way; those
+    # two messages are dropped, anything else is shown.
+    grep -vE 'diversions involved - output may be incorrect|diversion by libc6 (from|to): /lib64/ld-linux-x86-64\.so\.2|could avoid a useless dependency if .* was not linked against ld-linux-x86-64\.so\.2' \
+        "$scratch/warnings" | sed 's/^/package: dpkg-shlibdeps: /' >&2 || true
     rm -rf "$scratch"
     shlibs="${shlibs#shlibs:Depends=}"
     while IFS= read -r entry; do
@@ -281,7 +303,7 @@ check_inside() {
     apt-get update -qq
     # Installed first so that their triggers (shared-mime-info, desktop-file-utils) run when md is.
     apt-get install -y -qq --no-install-recommends \
-        shared-mime-info desktop-file-utils xdg-utils libglib2.0-bin appstream apparmor lintian \
+        shared-mime-info desktop-file-utils xdg-utils libglib2.0-bin appstream apparmor \
         zip ca-certificates >/dev/null
 
     say "apt install ./$(basename "$deb") — every Depends from the archive"
@@ -364,17 +386,6 @@ EOF
         printf '%s\n' "$out" | sed 's/^/  /' >&2; ok "appstreamcli validate --no-net"
     else printf '%s\n' "$out" >&2; fail "appstreamcli validate --no-net"; fi
 
-    # lintian: no error or warning; overrides only for the tags docs/packaging.md §8.2 lists.
-    cp "$deb" /tmp/lintian.deb && chmod 0644 /tmp/lintian.deb
-    runuser -u nobody -- env HOME=/tmp lintian --display-info --show-overrides --tag-display-limit 0 \
-        /tmp/lintian.deb > /tmp/lintian.log 2>&1 || true
-    sed 's/^/  /' /tmp/lintian.log >&2
-    if grep -qE '^(E|W): ' /tmp/lintian.log; then fail "lintian reports errors or warnings"; fi
-    if grep -E '^O: ' /tmp/lintian.log | grep -vqE ' (font-in-non-font-package|font-outside-font-dir|embedded-javascript-library|package-contains-documentation-outside-usr-share-doc|hardening-no-fortify-functions) '; then
-        fail "lintian overrides a tag docs/packaging.md §8.2 does not list"
-    fi
-    grep -qE '^(E|W): ' /tmp/lintian.log || ok "lintian: no error or warning"
-
     # The user's own files, which no step below may touch.
     mkdir -p /root/.config/md /root/.local/state/md /root/.local/share/md/drafts
     printf '[md]\nmd.pdfPageSize=a5\n' > /root/.config/md/settings.conf
@@ -421,11 +432,41 @@ EOF
     say "every check passed for $(basename "$deb")"
 }
 
+# lintian (docs/packaging.md §8.2), in its own throwaway ubuntu:26.04 of the machine's own
+# architecture: lintian inspects the .deb and never runs it, and under Rosetta its unpacking hits
+# the tar limitation deb_inside describes. No error or warning; overrides only for the tags §8.2
+# lists; and the font overrides must be there, or lintian did not look at the package at all.
+lintian_inside() {
+    local arch="$1" version deb code=0 status=0
+    version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' /src/Cargo.toml)"
+    deb="/dist/${PKG}_${version}_${arch}.deb"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends lintian >/dev/null
+    say "lintian $(dpkg-query -W -f '${Version}' lintian) on $(basename "$deb")"
+    cp "$deb" /tmp/lintian.deb && chmod 0644 /tmp/lintian.deb
+    runuser -u nobody -- env HOME=/tmp lintian --display-info --show-overrides --tag-display-limit 0 \
+        /tmp/lintian.deb > /tmp/lintian.log 2>&1 || code=$?
+    grep -v '^N: ' /tmp/lintian.log | sed 's/^/  /' >&2
+    if [ "$code" -gt 1 ]; then say "CHECK FAILED: lintian could not run (exit $code)"; status=1; fi
+    if grep -qE '^(E|W): ' /tmp/lintian.log; then say "CHECK FAILED: lintian reports errors or warnings"; status=1; fi
+    if grep -E '^O: ' /tmp/lintian.log | grep -vqE ' (font-in-non-font-package|font-outside-font-dir|embedded-javascript-library|package-contains-documentation-outside-usr-share-doc|hardening-no-fortify-functions) '; then
+        say "CHECK FAILED: lintian overrides a tag docs/packaging.md §8.2 does not list"; status=1
+    fi
+    if ! grep -qE '^O: md: font-in-non-font-package ' /tmp/lintian.log; then
+        say "CHECK FAILED: lintian reported nothing about the KaTeX fonts: it did not analyse the package"; status=1
+    fi
+    [ "$status" = 0 ] || die "lintian checks failed for $(basename "$deb")"
+    say "ok: lintian: no error or warning, overrides only from docs/packaging.md §8.2"
+}
+
 # ---------------------------------------------------------------------------------------------
 # On the host.
 
 case "${1:-}" in
     --build-inside) build_inside "$2"; exit ;;
+    --deb-inside) deb_inside "$2"; exit ;;
+    --lintian-inside) lintian_inside "$2"; exit ;;
     --check-inside) check_inside "$2"; exit ;;
 esac
 
@@ -469,12 +510,24 @@ else
 fi
 mkdir -p "$ROOT/dist"
 
+case "$(docker version --format '{{.Server.Arch}}')" in
+    arm64 | aarch64) native=arm64 ;;
+    *) native=amd64 ;;
+esac
+build_image() {
+    if [ "${MD_PACKAGE_SKIP_IMAGE:-0}" != 1 ]; then
+        say "image md-linux-dev:$1 (docker/Dockerfile, linux/$1)"
+        docker buildx build --quiet --platform "linux/$1" --load -t "md-linux-dev:$1" "$ROOT/docker" >/dev/null
+    fi
+}
+built_native=0
+
 for arch in "${arches[@]}"; do
     image="md-linux-dev:$arch"
-    if [ "${MD_PACKAGE_SKIP_IMAGE:-0}" != 1 ]; then
-        say "image $image (docker/Dockerfile, linux/$arch)"
-        docker buildx build --quiet --platform "linux/$arch" --load -t "$image" "$ROOT/docker" >/dev/null
-    fi
+    build_image "$arch"
+    if [ "$arch" = "$native" ]; then built_native=1
+    elif [ "$built_native" = 0 ]; then build_image "$native"; built_native=1; fi
+    stage_volume="md-linux-package-stage-$(basename "$ROOT")-$arch"
     if [ "$clean" = 1 ]; then
         target_volume="md-linux-package-clean-$arch-$$"
     else
@@ -483,12 +536,21 @@ for arch in "${arches[@]}"; do
     status=0
     docker run --rm --platform "linux/$arch" \
         -v "$export_dir:/src:ro" \
-        -v "$ROOT/dist:/out" \
         -v md-linux-cargo:/cargo \
         -v "$target_volume:/target" \
+        -v "$stage_volume:/stage" \
         -e SOURCE_DATE_EPOCH \
         "$image" bash /src/scripts/package.sh --build-inside "$arch" || status=$?
     if [ "$clean" = 1 ]; then docker volume rm "$target_volume" >/dev/null || true; fi
+    if [ "$status" = 0 ]; then
+        docker run --rm --platform "linux/$native" \
+            -v "$export_dir:/src:ro" \
+            -v "$ROOT/dist:/out" \
+            -v "$stage_volume:/stage" \
+            -e SOURCE_DATE_EPOCH \
+            "md-linux-dev:$native" bash /src/scripts/package.sh --deb-inside "$arch" || status=$?
+    fi
+    docker volume rm "$stage_volume" >/dev/null 2>&1 || true
     [ "$status" = 0 ] || die "the $arch build failed"
 
     if [ "$check" = 1 ]; then
@@ -497,6 +559,10 @@ for arch in "${arches[@]}"; do
             -v "$ROOT/dist:/dist:ro" \
             -e MD_PACKAGE_ALLOW_MISSING_VERSION \
             "$BASE" bash /src/scripts/package.sh --check-inside "$arch"
+        docker run --rm --platform "linux/$native" \
+            -v "$export_dir:/src:ro" \
+            -v "$ROOT/dist:/dist:ro" \
+            "$BASE" bash /src/scripts/package.sh --lintian-inside "$arch"
     fi
 done
 rm -rf "$export_dir"
