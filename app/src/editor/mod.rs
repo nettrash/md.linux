@@ -3,7 +3,7 @@
 //! | Module | What |
 //! | --- | --- |
 //! | [`editor_pane`] | `EditorPane`: the `TextView`, placeholder, CSS class, jumps |
-//! | [`typing`] | `TypingHooks` / `FormattingAdapter` glue at user-action boundaries |
+//! | [`typing`] | pure: the user-action sequencing behind `TypingHooks` (+ tests) |
 //! | [`offsets`] | pure: char ↔ UTF-16 offsets (+ tests) |
 //! | [`find_bar`] | `FindBar` |
 //! | [`article_panes`] | `ArticlePanes`: editor column + preview, breakpoint, divider |
@@ -12,6 +12,8 @@
 //! | [`document_bar`] | the conflict / save-error bar |
 //!
 //! Owner: P3.
+// The windows (P1, P5) construct these; until their merge only the self-test reaches them.
+#![cfg_attr(not(feature = "selftest"), allow(dead_code))] // P3: removed at the integration gate (P1)
 
 pub mod article_panes;
 pub mod document_bar;
