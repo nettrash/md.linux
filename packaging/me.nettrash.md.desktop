@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=md
+GenericName=Markdown Editor
+Comment=Write Markdown and see it rendered
+Icon=me.nettrash.md
+Exec=md %F
+TryExec=md
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=markdown;editor;preview;writing;book;latex;mermaid;plantuml;
+MimeType=text/markdown;text/plain;text/x-plantuml;text/vnd.graphviz;application/x-textpack;
+StartupNotify=true
+StartupWMClass=me.nettrash.md
+Actions=new-document;
+
+[Desktop Action new-document]
+Name=New Document
+Exec=md --new-window
