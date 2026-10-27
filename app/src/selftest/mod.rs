@@ -361,7 +361,9 @@ impl Harness {
     }
 
     /// Screen coordinates of a point in `widget`: the X11 window's origin plus the surface
-    /// transform plus the widget's offset in the window.
+    /// transform plus the widget's offset in the window. xdotool and the X server count device
+    /// pixels, GTK lays out in logical ones: under `GDK_SCALE=2` everything inside the window is
+    /// twice as far from its origin on screen.
     async fn screen_point(
         &self,
         window: &gtk::Window,
@@ -376,7 +378,9 @@ impl Harness {
         let (wx, wy) = (field("X=")?, field("Y=")?);
         let point = widget.compute_point(window, &gtk::graphene::Point::new(x as f32, y as f32))?;
         let (sx, sy) = window.surface_transform();
-        Some(((wx + sx + f64::from(point.x())).round() as i32, (wy + sy + f64::from(point.y())).round() as i32))
+        let scale = window.surface().map_or(1.0, |surface| surface.scale());
+        let device = |origin: f64, offset: f64| (origin + (offset * scale)).round() as i32;
+        Some((device(wx, sx + f64::from(point.x())), device(wy, sy + f64::from(point.y()))))
     }
 
     /// Every toplevel GTK has now — to tell a dialog that appears later from what was there.
