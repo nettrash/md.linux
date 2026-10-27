@@ -12,8 +12,12 @@
 //! | [`pdf_export`] | `PdfExport.cs` |
 //! | [`diagram_svg`] | `DiagramSvg.cs` |
 //! | [`latex_export`] | `LaTeXExport.cs` |
+//! | [`epub_metadata`] | `EpubMetadata.cs` |
+//! | [`epub_export`] | `EpubExport.cs` |
 
 pub mod diagram_svg;
+pub mod epub_export;
+pub mod epub_metadata;
 pub mod export_file_names;
 pub mod html_export;
 pub mod inflate;
@@ -24,6 +28,10 @@ pub mod zip_reader;
 pub mod zip_writer;
 
 pub use diagram_svg::Diagram;
+pub use epub_export::{
+    EpubError, EpubImage, EpubPlan, EpubSnapshotCountError, EpubUnit, EpubUnitPlan, NavEntry, RichElement, RichSnapshot,
+};
+pub use epub_metadata::{CoverReference, EpubCover, EpubMetadata};
 pub use html_export::EmptyCapture;
 pub use text_bundle::{Asset, BundleWrapper, Rewrite};
 pub use zip_writer::{ZipEntry, ZipError, ZipWriter};
