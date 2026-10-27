@@ -1164,6 +1164,7 @@ since the epoch; §6.6 — to be added to md-logic, §15).
 | `session.json` | `$XDG_STATE_HOME/md/session.json` | XDG STATE: layout and open files reused on restart (§1.6) |
 | drafts | `$XDG_DATA_HOME/md/drafts/*.md` (`0700` / `0600`) | user text, not cache (§1.6) |
 | recent documents | `~/.local/share/recently-used.xbel` (GTK, shared) | the desktop's own list (§6.6) |
+| the file chooser's own preferences | `~/.config/dconf/user` (the desktop's settings database, shared) | written by GTK's file chooser (GSettings `org.gtk.gtk4.Settings.FileChooser`: size, sort order, hidden files…) whenever md shows it — never by md's code, never a file name; the `privacy` self-test proves it holds only that schema's keys |
 | PDF temp files | `$XDG_RUNTIME_DIR/md/` (deleted after use) | tmpfs, per user |
 | web data | nowhere — ephemeral `NetworkSession` | §4.1 |
 | per-document encoding, newline, scroll | memory only | as md.win |
@@ -1282,7 +1283,7 @@ owned by the work package it checks (docs/shell-work-packages.md).
 | `preview` | engines render offline (KaTeX `.katex` ≥ 1, `\ce{}` with 0 `.katex-error`, hljs, Mermaid, Graphviz, PlantUML SVGs, `plot` 1 svg / 2 polylines / no plot script) **under the CSP**; `javascript:` and `onclick` links do nothing; `other.md` cancelled; `#slug` scrolls; 350 ms debounce = one reload; scroll kept; dark switch re-renders with `data-md-dark`; scroll sync both ways; a killed web process (`terminate_web_process`) reloads once, twice → the notice |
 | `exports` | PDF A4 595 × 842 pt and 6 × 9 in 432 × 648 pt, three `\newpage` sections → three pages; HTML stands alone (opened from `file://` in a fresh renderer: `.katex` present, `compatMode` CSS1Compat); EPUB snapshot count == markup count, PNGs valid, 2× within ±1 px, also at `GDK_SCALE=2`; a 40-page document's last formula snapshots (visible-region path); SVG for each diagram kind; LaTeX; TextBundle with an image beside; the cover from a file beside; exported HTML/EPUB never contain `md-linux-fonts` |
 | `books` | no-book status page; open the Example Book; sidebar rows in order; select → editor; rename / move up / delete through the context actions; Alt+Down / Alt+Up step; Open in New Window → hand-off stage, Show Window; Print Book renders; Export Book PDF / EPUB / LaTeX |
-| `privacy` | after all groups: the files under `OUT/home` are only `settings.conf`, `session.json`, the drafts and `recently-used.xbel` — nothing under `.cache/md` or `.local/share/md/webkitgtk` |
+| `privacy` | after all groups: the files under `OUT/home` are only `settings.conf`, `session.json`, the drafts and `recently-used.xbel` — nothing under `.cache/md` or `.local/share/md/webkitgtk`; beside them only system caches under `.cache/` (Mesa's shader cache) and `.config/dconf/user` holding nothing but GTK's file-chooser keys (§9.2) |
 
 `--no-input` skips the keystroke rows (they need focus on the Xvfb display); CI and agents run them —
 Xvfb with no window manager gives md the focus.

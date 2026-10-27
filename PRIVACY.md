@@ -82,8 +82,14 @@ Two things are held for md by the desktop itself: the **recent documents
 list** in `~/.local/share/recently-used.xbel`, which md adds a document to
 when you open or save it, and which GNOME Files and other applications share
 (**Clear Menu** empties md's menu without deleting anybody else's entries;
-md removes an entry whose file no longer exists); and whatever GTK's file
-chooser remembers about its own use, such as its last size.
+md removes an entry whose file no longer exists); and the **file chooser's
+own preferences**. Whenever md shows GTK's Open or Save dialog, GTK itself
+records how you left that dialog — its size, the sort order, whether hidden
+files are shown, the sidebar's width, and the like; never a file or folder
+name — in the desktop's settings database, `~/.config/dconf/user`, which
+every GTK and GNOME application shares. md's own code writes nothing there,
+and its self-test checks that the dialog's settings are all md's use of it
+adds.
 
 One file may be written beside *your* document rather than in md's folders:
 if a save fails while a window is closing — a full disk, a read-only folder —
