@@ -529,8 +529,8 @@ The shell is done when, on the merged branch:
 3. every `CommandId` of the Linux table is wired: P1's `shell` group fails if a row's action has no
    handler in the window kind that can enable it (md.win's `WindowSurfaceTests` rule);
 4. `scripts/dev.sh package amd64` and `arm64` produce reproducible `.deb`s that pass P6's checks;
-5. each package's real-desktop list is gathered into one checklist for nettrash (docs/packaging.md
-   §11 references it).
+5. each package's real-desktop list is gathered into one checklist for nettrash
+   (`docs/desktop-checklist.md`; docs/packaging.md §11 references it).
 
 The order of merges: S0 → P2, P3, P6 → P4 (preview) → P1 → P4 (exports) → P5 → the gate. P1 runs the
 gate and routes failures to the owning package.
