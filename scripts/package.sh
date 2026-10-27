@@ -26,9 +26,7 @@
 #
 # The package's SOURCE_DATE_EPOCH is the commit time of HEAD.
 #
-# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses an existing md-linux-dev:<arch> image;
-# MD_PACKAGE_ALLOW_MISSING_VERSION=1 turns a missing `md --version` into a warning (the shell
-# skeleton adds the option, shell-design §1.1).
+# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses an existing md-linux-dev:<arch> image.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -320,7 +318,6 @@ check_inside() {
     local v
     v="$(timeout 30 md --version 2>&1 | head -1 || true)"
     if [ "$v" = "md $version" ]; then ok "md --version: $v"
-    elif [ "${MD_PACKAGE_ALLOW_MISSING_VERSION:-0}" = 1 ]; then say "WARNING: md --version printed '$v', not 'md $version' (allowed by MD_PACKAGE_ALLOW_MISSING_VERSION)"
     else fail "md --version printed '$v', not 'md $version'"; fi
 
     # The AppArmor profile: postinst created its local include; the profile parses (no kernel
@@ -557,7 +554,6 @@ for arch in "${arches[@]}"; do
         docker run --rm --platform "linux/$arch" \
             -v "$export_dir:/src:ro" \
             -v "$ROOT/dist:/dist:ro" \
-            -e MD_PACKAGE_ALLOW_MISSING_VERSION \
             "$BASE" bash /src/scripts/package.sh --check-inside "$arch"
         docker run --rm --platform "linux/$native" \
             -v "$export_dir:/src:ro" \
