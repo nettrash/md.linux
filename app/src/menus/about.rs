@@ -8,10 +8,6 @@ use md_logic::strings::{self, help};
 
 use crate::app::APP_ID;
 
-/// md-logic gap: the developer's name has no `strings::help` constant yet (the copyright line
-/// carries it); the About dialog's developer field until one lands.
-const DEVELOPER: &str = "nettrash";
-
 /// The comments field: the engines heading, then one engine per line.
 pub fn comments() -> String {
     let mut text = String::from(help::ENGINES_HEADING);
@@ -28,7 +24,7 @@ pub fn show_about(parent: &gtk::Window) {
         .application_name(strings::APP_NAME)
         .application_icon(APP_ID)
         .version(env!("CARGO_PKG_VERSION"))
-        .developer_name(DEVELOPER)
+        .developer_name(help::DEVELOPER)
         .copyright(help::COPYRIGHT)
         .license_type(gtk::License::MitX11)
         .website(help::SUPPORT_URL)

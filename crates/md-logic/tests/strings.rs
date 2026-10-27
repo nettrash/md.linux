@@ -116,3 +116,28 @@ fn the_preview_give_up_line_is_the_macs_word_for_word() {
 fn the_open_dialogs_filter_is_named() {
     assert_eq!(documents::OPEN_FILTER, "Supported Documents");
 }
+
+#[test]
+fn the_move_and_replace_messages() {
+    assert_eq!(documents::COULD_NOT_MOVE, "Could not move");
+    assert_ne!(documents::COULD_NOT_MOVE, documents::COULD_NOT_RENAME);
+    assert_eq!(documents::file_exists_question("notes.md"), "“notes.md” already exists. Do you want to replace it?");
+    assert_eq!(documents::file_exists_question("Привет.md"), "“Привет.md” already exists. Do you want to replace it?");
+}
+
+#[test]
+fn the_sandbox_alert_names_the_profile() {
+    assert_eq!(preview::SANDBOX_ALERT_TITLE, "The Preview Cannot Start");
+    assert_eq!(
+        preview::SANDBOX_ALERT_MESSAGE,
+        "md draws its preview in a sandbox, and this system refused to create one. Reinstalling md restores the \
+         AppArmor profile it needs, /etc/apparmor.d/md."
+    );
+    assert!(preview::SANDBOX_ALERT_MESSAGE.ends_with("/etc/apparmor.d/md."));
+}
+
+#[test]
+fn about_names_the_developer_as_the_copyright_does() {
+    assert_eq!(help::DEVELOPER, "nettrash");
+    assert!(help::COPYRIGHT.contains(help::DEVELOPER));
+}

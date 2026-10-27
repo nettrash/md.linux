@@ -21,14 +21,7 @@ use md_logic::documents::file_names;
 use md_logic::event::Event;
 use md_logic::exec::LocalBoxFuture;
 use md_logic::seams::{Alerts, FileTypeChoice, Pickers};
-use md_logic::strings::documents::OPEN_FILTER;
-
-/// md-logic gap: the replace question for a name md completed with the default extension (GTK
-/// asked only about the name as typed). The family has no such string — the Mac's and GTK's own
-/// panels ask it — so it is spelled after NSSavePanel's. Remove once md-logic has one.
-pub fn file_exists_question(name: &str) -> String {
-    format!("\u{201C}{name}\u{201D} already exists. Do you want to replace it?")
-}
+use md_logic::strings::documents::{OPEN_FILTER, file_exists_question};
 
 /// The MIME types the Open filter accepts besides the extensions (§6.1).
 const OPEN_MIME_TYPES: [&str; 3] = ["text/markdown", "text/x-markdown", "text/plain"];
@@ -154,7 +147,7 @@ impl Pickers for GtkPickers {
 
 /// What happens to the path GTK's save dialog returned (§6.1): kept when it has an extension,
 /// else completed with `default_extension` — and when that completed name exists, md asks
-/// ([`file_exists_question`]) before handing it out; `None` when the writer declines.
+/// (`strings::documents::file_exists_question`) before handing it out; `None` when the writer declines.
 pub fn finish_save(
     alerts: Rc<dyn Alerts>,
     chosen: String,

@@ -27,16 +27,10 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use md_logic::preview::asset_origin;
+use md_logic::strings::preview;
 
 use crate::services::paths::Paths;
 use crate::web::asset_host::AssetHost;
-
-/// md-logic gap: the sandbox alert's words are not in md-logic's `strings` (shell-design §4.1 names
-/// the alert, §15 does not list it). Kept here until md-logic carries them.
-const SANDBOX_ALERT_TITLE: &str = "The Preview Cannot Start";
-/// md-logic gap: see [`SANDBOX_ALERT_TITLE`].
-const SANDBOX_ALERT_MESSAGE: &str = "md draws its preview in a sandbox, and this system refused to create one. \
-     Reinstalling md restores the AppArmor profile it needs, /etc/apparmor.d/md.";
 
 /// The environment variable WebKit reads to start its web processes without bubblewrap.
 const WEBKIT_NO_SANDBOX: &str = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
@@ -216,11 +210,11 @@ fn refuse_to_start() {
     };
     let parent = app.active_window().or_else(|| app.windows().into_iter().next());
     let Some(parent) = parent else {
-        eprintln!("md: {SANDBOX_ALERT_TITLE}: {SANDBOX_ALERT_MESSAGE}");
+        eprintln!("md: {}: {}", preview::SANDBOX_ALERT_TITLE, preview::SANDBOX_ALERT_MESSAGE);
         app.quit();
         return;
     };
-    let dialog = adw::AlertDialog::new(Some(SANDBOX_ALERT_TITLE), Some(SANDBOX_ALERT_MESSAGE));
+    let dialog = adw::AlertDialog::new(Some(preview::SANDBOX_ALERT_TITLE), Some(preview::SANDBOX_ALERT_MESSAGE));
     dialog.add_response("ok", md_logic::strings::buttons::OK);
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");

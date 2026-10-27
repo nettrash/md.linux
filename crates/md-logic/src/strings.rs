@@ -24,6 +24,10 @@
 //!   [`documents::OPEN_FILTER`], the name of the Open dialog's one filter. The other two Linux
 //!   words of §11 — "Quit" and "Find and Replace…" — are menu titles, so the command table holds
 //!   them.
+//! - Four more the GTK shell found it needed at its integration: [`documents::COULD_NOT_MOVE`]
+//!   (Move To…'s alert), [`documents::file_exists_question`] (the Save dialog's replace question
+//!   for a name md completed), [`preview::SANDBOX_ALERT_TITLE`] / [`preview::SANDBOX_ALERT_MESSAGE`]
+//!   (the WebKit sandbox preflight) and [`help::DEVELOPER`] (About md).
 
 /// The app's name.
 pub const APP_NAME: &str = "md";
@@ -139,6 +143,19 @@ pub mod documents {
     pub const RENAME_TITLE: &str = "Rename";
     pub const RENAME_MESSAGE: &str = "Only the name changes \u{2014} the file extension is kept.";
     pub const COULD_NOT_RENAME: &str = "Could not rename";
+
+    /// (Linux) File ▸ Move To…'s alert title when the move is refused (an existing file of that
+    /// name in the folder, a folder that cannot be written). The Mac's Move To is NSDocument's own
+    /// and words its failures itself; md.win reused [`COULD_NOT_RENAME`]. Ours names the command.
+    pub const COULD_NOT_MOVE: &str = "Could not move";
+
+    /// (Linux) The Save dialog's replace question for a name md completed with the default
+    /// extension (shell-design §6.1): GTK confirms only the name the user typed, so when "notes"
+    /// becomes "notes.md" and that file exists, md asks itself — in NSSavePanel's words (U+201C /
+    /// U+201D), which GTK's own chooser also uses.
+    pub fn file_exists_question(name: &str) -> String {
+        format!("\u{201C}{name}\u{201D} already exists. Do you want to replace it?")
+    }
 
     /// LINUX DECISION: the Mac's sentence (md.macOS `BookNavigator.renameItem`), the rule
     /// md-core's `book_folder::is_valid_name` enforces. md.win's is `A name cannot contain \ / : *
@@ -292,6 +309,15 @@ pub mod preview {
     /// in the same face as everything else; the next edit tries again by itself.
     pub const STOPPED_NOTICE_SOURCE: &str =
         "*The preview stopped unexpectedly. Your document is unchanged \u{2014} the next edit will try again.*";
+
+    /// (Linux) The one alert md shows when WebKit's bubblewrap sandbox cannot start (shell-design
+    /// §4.1): without a user namespace WebKit would abort md with no word, so md checks first,
+    /// says this and quits. The profile it names is the one the `.deb` installs
+    /// (docs/packaging.md §7).
+    pub const SANDBOX_ALERT_TITLE: &str = "The Preview Cannot Start";
+
+    pub const SANDBOX_ALERT_MESSAGE: &str = "md draws its preview in a sandbox, and this system refused to create \
+        one. Reinstalling md restores the AppArmor profile it needs, /etc/apparmor.d/md.";
 }
 
 /// §5.4: the Zen capsule's tooltips.
@@ -350,6 +376,10 @@ pub mod help {
     /// LINUX DECISION: md.win's is `https://nettrash.me/msstore/md/privacy.html`.
     pub const PRIVACY_URL: &str = "https://nettrash.me/linux/md/privacy.html";
     pub const COPYRIGHT: &str = "\u{00A9} 2026 nettrash. MIT licensed.";
+
+    /// (Linux) About md's developer field (`adw::AboutDialog::developer_name`); the Mac's About
+    /// panel has no such field, the copyright line carries the name.
+    pub const DEVELOPER: &str = "nettrash";
 
     /// §2.8: the line above [`ENGINES`] in the About dialog. "Bundled" and "open source" are the
     /// family's wording; the app never claims it has no third-party dependencies, and never that

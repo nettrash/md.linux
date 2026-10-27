@@ -42,7 +42,7 @@ use crate::services::document_ops;
 use crate::services::file_system::{CanonicalFileIdentity, StdFileSystem};
 use crate::services::file_watcher::GioFileWatcher;
 use crate::services::glib_seams::GlibScheduler;
-use crate::services::pickers::{GtkPickers, file_exists_question, finish_save};
+use crate::services::pickers::{GtkPickers, finish_save};
 
 /// How long a watcher row waits for the first report, and then for stragglers (the settle plus
 /// the coalescing, with room to spare).
@@ -1158,7 +1158,7 @@ async fn picker_rows(h: &Harness, window: &adw::ApplicationWindow, alerts: Rc<dy
         None
     };
     let got = answer_alert(h, window, &answer, Answer::Escape, "picker-save-replace").await;
-    let question = file_exists_question("Draft.md");
+    let question = md_logic::strings::documents::file_exists_question("Draft.md");
     h.check(
         "save_asks_before_replacing_a_completed_name",
         asked == Some(Some(question.clone()))
