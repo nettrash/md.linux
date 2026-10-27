@@ -345,6 +345,64 @@ fn a_stale_book_mark_does_not_exempt_the_next_ordinary_open() {
     assert_eq!(f.state.stored_mode(), ViewMode::Preview); // the remembered mode, not the default
 }
 
+// LINUX: Edit ▸ Find in a window that shows no editor — the Mac's `showEditor` (shell-design
+// §2.5), the Notes jump's nudge without the jump.
+
+#[test]
+fn find_in_preview_nudges_the_editor_back_and_stores_nothing() {
+    let f = Fixture::new();
+    f.controller.apply_memory(Some(PATH1), "# Something");
+    f.controller.select(ViewMode::Preview);
+    let mark = f.mark();
+
+    f.controller.show_editor();
+
+    assert_eq!(f.state.navigation_mode(), Some(ViewMode::Edit));
+    assert_eq!(f.state.effective_mode(), ViewMode::Edit);
+    assert_eq!(f.state.stored_mode(), ViewMode::Preview);
+    assert_eq!(f.writes_since(mark), 0);
+    assert_eq!(f.remembered(PATH1), "preview");
+    assert!(f.state.editor_jump().is_none()); // a nudge, not a jump
+
+    // Choosing a mode for real ends it, exactly like the note jump's.
+    f.controller.select(ViewMode::Preview);
+    assert_eq!(f.state.navigation_mode(), None);
+    assert_eq!(f.state.effective_mode(), ViewMode::Preview);
+}
+
+#[test]
+fn find_with_the_editor_on_screen_changes_nothing() {
+    let f = Fixture::new();
+    f.controller.apply_memory(Some(PATH1), "# Something"); // Split
+    f.controller.show_editor();
+    assert_eq!(f.state.navigation_mode(), None);
+    assert_eq!(f.state.effective_mode(), ViewMode::Split);
+
+    f.controller.select(ViewMode::Edit);
+    f.controller.show_editor();
+    assert_eq!(f.state.navigation_mode(), None);
+    assert_eq!(f.state.effective_mode(), ViewMode::Edit);
+}
+
+#[test]
+fn find_in_zens_reading_half_turns_zen_to_writing_and_stores_nothing() {
+    // The Mac: `if zenActive { zenReading = false }` — Zen's own switch, per-window state.
+    let f = Fixture::new();
+    f.controller.apply_memory(Some(PATH1), "# Something");
+    f.state.set_zen_active(true);
+    f.controller.select(ViewMode::Preview); // in Zen: read
+    assert!(f.state.zen_reading());
+    let mark = f.mark();
+
+    f.controller.show_editor();
+
+    assert!(!f.state.zen_reading());
+    assert!(f.state.zen_active());
+    assert_eq!(f.state.navigation_mode(), None);
+    assert_eq!(f.state.stored_mode(), ViewMode::Split);
+    assert_eq!(f.writes_since(mark), 0);
+}
+
 #[test]
 fn a_note_jump_from_split_or_edit_does_not_nudge() {
     let f = Fixture::new();

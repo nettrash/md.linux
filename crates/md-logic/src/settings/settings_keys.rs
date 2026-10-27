@@ -16,6 +16,7 @@
 //! | `md.continueLists` | bool | `true` | Edit ▸ Typing ▸ Continue Lists and Tables | the editor (Enter) | the same key on every md port (smart-typing.md §3.1) |
 //! | `md.capitalizeSentences` | bool | `true` | Edit ▸ Typing ▸ Capitalize Sentences | the editor (the letter) | the same key on every md port |
 //! | `md.wrapSelection` | bool | `true` | Edit ▸ Typing ▸ Wrap Selection When Typing | the editor (formatting.md §4) | 1.6 |
+//! | `md.linux.recentClearedAt` **(Linux)** | string, seconds since the Unix epoch | absent ⇒ never cleared | File ▸ Open Recent ▸ Clear Menu | the Open Recent list | hides md's older entries; the desktop's shared recent list keeps them |
 //!
 //! Not settings keys: `md.viewMode`, `md.zen`, `md.zenReading` and window placements →
 //! [`SESSION_FILE_NAME`]; per-document encoding / newline / scroll positions → session memory
@@ -23,7 +24,8 @@
 //!
 //! LINUX DECISIONS: md.win's two Windows-only keys `md.win.windowSize.document` /
 //! `md.win.windowSize.book` are spelled `md.linux.windowSize.*` here, in GTK's logical pixels
-//! instead of WinUI's effective pixels. md.win's `BookAccessToken` (`md.book`, the
+//! instead of WinUI's effective pixels. [`RECENT_CLEARED_AT`] is Linux's own: md.win's Open Recent
+//! is a list md keeps itself, Linux's is the desktop's. md.win's `BookAccessToken` (`md.book`, the
 //! `FutureAccessList` token holding the book folder grant) has no counterpart: an unsandboxed
 //! `.deb` app opens any folder its user can, so [`BOOK_BOOKMARK`] is the whole record. md.win's
 //! `WebView2UserDataFolderName` has none either: where WebKitGTK keeps website data (and the
@@ -84,8 +86,15 @@ pub const CAPITALIZE_SENTENCES: &str = "md.capitalizeSentences";
 /// editor.
 pub const WRAP_SELECTION: &str = "md.wrapSelection";
 
-/// The eleven keys, in §9 order.
-pub const ALL: [&str; 11] = [
+/// (Linux) string — seconds since the Unix epoch (decimal) of the last File ▸ Open Recent ▸ Clear
+/// Menu; absent ⇒ never cleared. md's Open Recent lists only the entries md registered *after* it
+/// (shell-design §6.6): the list lives in the desktop's shared `recently-used.xbel`, whose entries
+/// other applications keep, so Clear Menu hides md's history instead of deleting anyone's. Written
+/// by Clear Menu; read when the menu is built ([`recent_cleared_at`](super::recent_cleared_at)).
+pub const RECENT_CLEARED_AT: &str = "md.linux.recentClearedAt";
+
+/// The twelve keys, in §9 order.
+pub const ALL: [&str; 12] = [
     VIEW_MODE_MEMORY,
     PDF_PAGE_SIZE,
     BOOK_BOOKMARK,
@@ -97,6 +106,7 @@ pub const ALL: [&str; 11] = [
     CONTINUE_LISTS,
     CAPITALIZE_SENTENCES,
     WRAP_SELECTION,
+    RECENT_CLEARED_AT,
 ];
 
 pub const PDF_PAGE_SIZE_DEFAULT: &str = "a4";

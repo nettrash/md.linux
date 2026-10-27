@@ -62,6 +62,7 @@ fn every_field_the_snapshot_carries_is_part_of_its_equality() {
         pdf_page_size_id: _,
         sidebar_open: _,
         is_full_screen: _,
+        dialog_open: _,
         find_bar_open: _,
         continue_lists: _,
         capitalize_sentences: _,
@@ -99,13 +100,15 @@ fn every_field_the_snapshot_carries_is_part_of_its_equality() {
         ("pdf_page_size_id", ShellSnapshot { pdf_page_size_id: PageSize::US_LETTER.id.to_string(), ..base() }),
         ("sidebar_open", ShellSnapshot { sidebar_open: true, ..base() }),
         ("is_full_screen", ShellSnapshot { is_full_screen: true, ..base() }),
+        // LINUX: an alert is up in the window (§2.2).
+        ("dialog_open", ShellSnapshot { dialog_open: true, ..base() }),
         ("find_bar_open", ShellSnapshot { find_bar_open: true, ..base() }),
         // empty()'s three settings are the defaults, true.
         ("continue_lists", ShellSnapshot { continue_lists: false, ..base() }),
         ("wrap_selection", ShellSnapshot { wrap_selection: false, ..base() }),
         ("capitalize_sentences", ShellSnapshot { capitalize_sentences: false, ..base() }),
     ];
-    assert_eq!(mutations.len(), 28);
+    assert_eq!(mutations.len(), 29);
 
     let baseline = ShellSnapshot::empty();
     for (name, mutated) in mutations {

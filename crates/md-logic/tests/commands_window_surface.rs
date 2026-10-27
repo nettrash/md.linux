@@ -198,35 +198,42 @@ fn the_find_bars_replace_and_replace_all_travel_the_normal_document_path() {
     // md.win: OnReplaceRequested / OnReplaceAllRequested go through Panes.Editor.ReplaceRange.
 }
 
-/// §3.5: Ctrl+Z reaches the document only through the widget that holds focus, because Undo is
-/// deliberately not a window accelerator (§2.4) — so Replace All must hand focus back to the
+/// §3.6: Ctrl+Z reaches the document only through the widget that holds focus — on Linux because
+/// Undo's handler dispatches to that widget (§2.2) — so Replace All must hand focus back to the
 /// editor by selecting what it rewrote. md.win pins that in the window's source (WinUI only); the
-/// half that is md-logic's — Undo is not a root accelerator — is ported.
+/// half that is md-logic's — Undo acts on the focused widget — is ported.
 #[test]
 fn replace_all_selects_what_it_rewrote_so_ctrl_z_reaches_the_document() {
-    assert!(!command_table::spec(CommandId::Undo).root_accelerator);
+    assert!(command_table::spec(CommandId::Undo).dispatches_to_focus);
 }
 
-/// §3.5 read with §2.4's enablement: Find… and Replace… are greyed the moment the editor leaves
-/// the screen, and a bar already open has to obey the same rule. md.win also pins the window's
-/// OnLayoutChanged hiding the bar (WinUI only); the enablement half is ported.
+/// md.win: Find… and Replace… are greyed the moment the editor leaves the screen. LINUX DECISION
+/// (§2.5, the Mac's 1.5): the bar still leaves with the editor, but Find… and Find and Replace…
+/// stay live and nudge the editor back first (`ViewModeController::show_editor`); the rows that
+/// act on a hit or on the editor's selection are greyed until it is back.
 #[test]
 fn the_find_bar_leaves_the_screen_with_the_editor() {
-    let preview = ShellSnapshot { editor_visible: false, ..document_snapshot() };
-    assert!(!is_enabled(CommandId::Find, &preview));
-    assert!(!is_enabled(CommandId::Replace, &preview));
+    let preview = ShellSnapshot { editor_visible: false, zen_active: false, ..document_snapshot() };
+    assert!(is_enabled(CommandId::Find, &preview));
+    assert!(is_enabled(CommandId::Replace, &preview));
+    assert!(!is_enabled(CommandId::FindNext, &preview));
+    assert!(!is_enabled(CommandId::FindPrevious, &preview));
+    assert!(!is_enabled(CommandId::UseSelectionForFind, &preview));
 }
 
-/// The four §2.4/§2.2 rows the Book window may not light up, on a snapshot where every condition
-/// §2's tables name is true.
+/// md.win: The_book_window_never_enables_the_four_rows_it_has_no_surface_for (Save As… and the
+/// three find rows that open the bar). LINUX DECISION (§3.6): the find bar belongs to the article
+/// panes, so the Book window has one, as the Mac's book workspace does; only Save As… stays dark
+/// there.
 #[test]
-fn the_book_window_never_enables_the_four_rows_it_has_no_surface_for() {
+fn the_book_window_never_enables_save_as_and_has_the_find_bar() {
     let everything = ShellSnapshot { has_find_query: true, recent_entries: vec![], ..book_snapshot() };
     assert!(!is_enabled(CommandId::SaveAs, &everything));
-    assert!(!is_enabled(CommandId::Find, &everything));
-    assert!(!is_enabled(CommandId::Replace, &everything));
-    assert!(!is_enabled(CommandId::UseSelectionForFind, &everything));
-    // The same four in a document window, so this is about the Book window and not the snapshot.
+    assert!(is_enabled(CommandId::Find, &everything));
+    assert!(is_enabled(CommandId::Replace, &everything));
+    assert!(is_enabled(CommandId::FindNext, &everything));
+    assert!(is_enabled(CommandId::UseSelectionForFind, &everything));
+    // The same rows in a document window, so this is about the Book window and not the snapshot.
     let writing = ShellSnapshot { zen_active: false, ..document_snapshot() };
     assert!(is_enabled(CommandId::SaveAs, &writing));
     assert!(is_enabled(CommandId::Find, &writing));
@@ -258,33 +265,41 @@ fn both_windows_reset_the_editor_through_the_pane_on_a_new_undo_generation() {
     // md.win: UndoGeneration → EditorPane.ResetHistory().
 }
 
-/// The three find rows that open the bar are dead in Zen, and no find row is live with no editor
-/// on screen. md.win also pins the handlers' `_state.ZenActive` guards (WinUI only); the
-/// enablement half is ported.
+/// md.win: the three find rows that open the bar are dead in Zen, and no find row is live with no
+/// editor on screen. LINUX DECISION (§2.5, §3.6, the Mac's): Zen's writing half keeps the editor
+/// and its bar, so every find row works there; with only the preview on screen (Preview, Zen
+/// reading) Find… and Find and Replace… act by nudging the editor back, and the three rows that
+/// would act on a hidden editor stay dark.
 #[test]
 fn every_find_row_the_enablement_lights_up_has_a_handler_that_acts() {
     let zen = ShellSnapshot { zen_active: true, editor_visible: true, ..document_snapshot() };
-    for id in [CommandId::Find, CommandId::Replace, CommandId::UseSelectionForFind] {
-        assert!(!is_enabled(id, &zen), "{id:?} is enabled in Zen, where its handler returns without doing anything.");
-    }
-    let preview = ShellSnapshot {
-        zen_active: false,
-        editor_visible: false,
-        has_find_query: true,
-        has_selection: true,
-        ..document_snapshot()
-    };
     for id in [
         CommandId::Find,
+        CommandId::Replace,
         CommandId::FindNext,
         CommandId::FindPrevious,
-        CommandId::Replace,
         CommandId::UseSelectionForFind,
     ] {
-        assert!(
-            !is_enabled(id, &preview),
-            "{id:?} is enabled with no editor on screen, where it can only act on a hidden widget."
-        );
+        assert!(is_enabled(id, &zen), "{id:?} is dark in Zen's writing half, which shows the editor and its bar.");
+    }
+    for zen_reading in [false, true] {
+        let preview = ShellSnapshot {
+            zen_active: zen_reading,
+            zen_reading,
+            editor_visible: false,
+            has_find_query: true,
+            has_selection: true,
+            ..document_snapshot()
+        };
+        for id in [CommandId::Find, CommandId::Replace] {
+            assert!(is_enabled(id, &preview), "{id:?} must nudge the editor back, not grey out");
+        }
+        for id in [CommandId::FindNext, CommandId::FindPrevious, CommandId::UseSelectionForFind] {
+            assert!(
+                !is_enabled(id, &preview),
+                "{id:?} is enabled with no editor on screen, where it can only act on a hidden widget."
+            );
+        }
     }
 }
 

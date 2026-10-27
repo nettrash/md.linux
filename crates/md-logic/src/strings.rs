@@ -19,6 +19,11 @@
 //!   table's Previous / Next Article, spelled as GTK labels them (`Chord::display_text`). The Mac's
 //!   ⌃⌘↑ / ⌃⌘↓ became Ctrl+Alt+Up / Down on Windows, which GNOME binds to workspace switching; see
 //!   `commands::command_table`. A test pins these three strings to the table's chords.
+//! - Two strings the GTK shell would otherwise spell itself live here (shell-design §11, §15):
+//!   [`preview::STOPPED_NOTICE_SOURCE`], the Mac's give-up line, and
+//!   [`documents::OPEN_FILTER`], the name of the Open dialog's one filter. The other two Linux
+//!   words of §11 — "Quit" and "Find and Replace…" — are menu titles, so the command table holds
+//!   them.
 
 /// The app's name.
 pub const APP_NAME: &str = "md";
@@ -78,6 +83,12 @@ pub mod buttons {
 /// rescue copies.
 pub mod documents {
     pub const COULD_NOT_OPEN: &str = "The document could not be opened.";
+
+    /// (Linux) The name of the Open dialog's single `gtk::FileFilter` — every extension
+    /// `DocumentLoader` opens, plus the Markdown and plain-text MIME types (shell-design §6.1). GTK
+    /// hides the filter popup when there is only one, but the name still reaches the portal and
+    /// screen readers. The Mac's open panel needs no name: it filters by UTI.
+    pub const OPEN_FILTER: &str = "Supported Documents";
     pub const TEXT_PACK_UNREADABLE: &str = "The TextPack could not be read.";
 
     /// The conflict bar's title; its two buttons are [`super::buttons::RELOAD_FROM_DISK`] /
@@ -271,6 +282,16 @@ pub mod books {
     pub fn article_unreadable(name: &str) -> String {
         format!("The article \"{name}\" could not be read.")
     }
+}
+
+/// §4.9: the live preview's own words.
+pub mod preview {
+    /// The one quiet line the preview shows once its web process has died twice in a row with no
+    /// render between (the Mac's `PreviewRetryPolicy.noticeSource`, byte for byte, U+2014). It is
+    /// Markdown, rendered through the ordinary document pipeline, so it arrives on the same paper
+    /// in the same face as everything else; the next edit tries again by itself.
+    pub const STOPPED_NOTICE_SOURCE: &str =
+        "*The preview stopped unexpectedly. Your document is unchanged \u{2014} the next edit will try again.*";
 }
 
 /// §5.4: the Zen capsule's tooltips.

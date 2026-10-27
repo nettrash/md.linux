@@ -96,9 +96,17 @@ pub struct CommandSpec {
     pub id: CommandId,
     /// The menu row's text, verbatim.
     pub title: &'static str,
-    /// The shortcut shown next to the row; `None` for the many rows that have none.
+    /// The shortcut shown next to the row — the first accelerator registered for it; `None` for
+    /// the many rows that have none. For [`CommandKind::WindowKey`] the key the window's own
+    /// controller matches, never registered.
     pub chord: Option<Chord>,
-    /// Where the row goes; `None` only for [`CommandKind::Accelerator`], which has no row.
+    /// A second accelerator for the same action, registered after [`CommandSpec::chord`] and never
+    /// shown (GTK labels a row with its first accelerator): Ctrl+Y for Redo beside Shift+Ctrl+Z,
+    /// and Ctrl+Alt+Up / Down for Previous / Next Article beside Alt+Up / Down — md.win's chords,
+    /// kept for the desktops that leave them free (KDE, Xfce; GNOME takes them for workspaces
+    /// before the app sees them). Shell-design §2.8, §2.9.
+    pub secondary_chord: Option<Chord>,
+    /// Where the row goes; `None` only for [`CommandKind::WindowKey`], which has no row.
     pub path: Option<MenuPath>,
     pub kind: CommandKind,
     /// A command md.macOS does not define as its own row — md.win's `WindowsOnly`, the design's
@@ -107,11 +115,17 @@ pub struct CommandSpec {
     /// Rows sharing a group sit together; a change of group between siblings is a separator.
     /// Numbers are per parent menu, in ascending order.
     pub group: u8,
-    /// False for the chords §2.4 deliberately leaves with the focused widget (Ctrl+Z, Shift+Ctrl+Z,
-    /// Ctrl+X/C/V/A and Delete): they are *shown* in the Edit menu (the menu item's `accel`
-    /// attribute) but never registered with `set_accels_for_action`, so `GtkTextView` and the
-    /// `WebKitWebView` keep their own editing keys.
-    pub root_accelerator: bool,
+    /// Undo, Redo, Cut, Copy, Paste, Delete and Select All (shell-design §2.2): registered like
+    /// every other chord, but the handler acts on whichever widget holds the keyboard focus — the
+    /// editor, a `gtk::Text` (a find field, a dialog's entry) or the preview
+    /// (`WebView::execute_editing_command`) — so Ctrl+C still copies a preview selection in Split.
+    /// While the action is disabled its chord falls through to that widget by itself.
+    ///
+    /// LINUX DECISION: md.win shows these chords without registering them. GTK 4.22's
+    /// `GtkPopoverMenu` documents no menu attribute that *displays* a chord which is not an
+    /// accelerator, so the rows are registered and dispatch instead (§2.2); Delete has no chord at
+    /// all, because registering the Delete key would take it from every entry.
+    pub dispatches_to_focus: bool,
 }
 
 /// The menu bar as a tree, derived from [`all`]: eight roots in bar order, each holding its rows
@@ -132,7 +146,8 @@ pub struct MenuNode {
 }
 
 /// The eight menus, in bar order. The Mac's bar without its app menu (§2.1): About moved to Help,
-/// Quit to the end of File. Format (1.6) sits after Edit.
+/// Quit to the end of File. Format (1.6) sits after Edit. The GTK shell gives each title its
+/// mnemonic (`_File`, `F_ormat`, …) when it builds the bar.
 pub const MENU_TITLES: [&str; 8] = ["File", "Edit", "Format", "View", "Book", "Go", "Window", "Help"];
 
 /// View's full-screen row while the window is full screen (§2.5); [`CommandId::FullScreen`]'s
@@ -147,6 +162,7 @@ const FILE_EXPORT: MenuPath = MenuPath::submenu("File", "Export");
 const FILE_EXPORT_DIAGRAMS: MenuPath = MenuPath::nested("File", "Export", "Diagram as SVG");
 const FILE_EXPORT_PAGE_SIZE: MenuPath = MenuPath::nested("File", "Export", "PDF Page Size");
 const EDIT: MenuPath = MenuPath::menu("Edit");
+const EDIT_FIND: MenuPath = MenuPath::submenu("Edit", "Find");
 const EDIT_TYPING: MenuPath = MenuPath::submenu("Edit", "Typing");
 const FORMAT: MenuPath = MenuPath::menu("Format");
 const FORMAT_HEADING: MenuPath = MenuPath::submenu("Format", "Heading");
@@ -163,12 +179,14 @@ const CTRL: KeyModifiers = KeyModifiers::CTRL;
 const CTRL_SHIFT: KeyModifiers = KeyModifiers::CTRL.with(KeyModifiers::SHIFT);
 const CTRL_ALT: KeyModifiers = KeyModifiers::CTRL.with(KeyModifiers::ALT);
 const ALT: KeyModifiers = KeyModifiers::ALT;
+const CTRL_ALT_UP: Chord = Chord::new(keys::UP, CTRL_ALT);
+const CTRL_ALT_DOWN: Chord = Chord::new(keys::DOWN, CTRL_ALT);
 
 const fn chord(key: &'static str, modifiers: KeyModifiers) -> Option<Chord> {
     Some(Chord::new(key, modifiers))
 }
 
-/// A row in a menu, registered on the window (the common case).
+/// A row in a menu (the common case).
 const fn row(
     id: CommandId,
     title: &'static str,
@@ -178,20 +196,36 @@ const fn row(
     port_only: bool,
     group: u8,
 ) -> CommandSpec {
-    CommandSpec { id, title, chord, path: Some(path), kind, port_only, group, root_accelerator: true }
-}
-
-/// An Edit row whose chord belongs to the focused widget: shown, never registered.
-const fn widget_owned(id: CommandId, title: &'static str, chord: Option<Chord>, group: u8) -> CommandSpec {
     CommandSpec {
         id,
         title,
         chord,
+        secondary_chord: None,
+        path: Some(path),
+        kind,
+        port_only,
+        group,
+        dispatches_to_focus: false,
+    }
+}
+
+/// The same row with a second, unshown accelerator.
+const fn also(spec: CommandSpec, secondary: Chord) -> CommandSpec {
+    CommandSpec { secondary_chord: Some(secondary), ..spec }
+}
+
+/// An Edit row whose handler acts on the focused widget (§2.2).
+const fn editing(id: CommandId, title: &'static str, chord: Option<Chord>, group: u8) -> CommandSpec {
+    CommandSpec {
+        id,
+        title,
+        chord,
+        secondary_chord: None,
         path: Some(EDIT),
         kind: CommandKind::Item,
         port_only: false,
         group,
-        root_accelerator: false,
+        dispatches_to_focus: true,
     }
 }
 
@@ -201,17 +235,25 @@ use CommandKind as K;
 /// The table. Row order is menu order; `group` jumps mark the dividers §2 draws. Titles carry the
 /// Mac's U+2026 ellipsis, written as an escape so no editor can quietly swap it for three dots.
 ///
-/// LINUX DECISIONS (each chord checked against GtkTextView 4.22's own bindings and the GNOME 50 /
-/// Ubuntu 26.04 defaults — mutter, gnome-shell, gnome-settings-daemon, IBus, the Ubuntu dock):
+/// LINUX DECISIONS (shell-design §2.9; each chord checked against GtkTextView 4.22's own bindings
+/// and the GNOME 50 / Ubuntu 26.04 defaults — mutter, gnome-shell, gnome-settings-daemon, IBus, the
+/// Ubuntu dock):
 /// - Previous / Next Article are **Alt+Up / Alt+Down**. The Mac's ⌃⌘↑/↓ became Ctrl+Alt+Up/Down
 ///   on Windows, which GNOME binds to `switch-to-workspace-up/down`; Alt+Up/Down is md.win's own
 ///   documented fallback, and nothing on the desktop or in GtkTextView claims it (GtkTextView binds
-///   Alt+arrows only on macOS builds).
-/// - Find Next / Find Previous are **Ctrl+G / Shift+Ctrl+G**, the Mac's ⌘G / ⇧⌘G and GNOME's own
-///   (GtkSearchEntry's next-match / previous-match), instead of Windows' F3 / Shift+F3.
-/// - Redo shows **Shift+Ctrl+Z**, GNOME's spelling (GtkTextView binds it and Ctrl+Y alike).
-/// - **Quit md** (the Mac's own row) with GNOME's **Ctrl+Q** replaces Windows' chordless Exit.
+///   Alt+arrows only on macOS builds). Ctrl+Alt+Up / Down stay registered second, for desktops
+///   that leave them free.
+/// - The find rows sit in an **Edit ▸ Find** submenu with the Mac's titles and order (md.win
+///   flattened them): Find…, **Find and Replace…**, Find Next, Find Previous, then Use Selection for
+///   Find. Find Next / Find Previous are **Ctrl+G / Shift+Ctrl+G**, the Mac's ⌘G / ⇧⌘G and GNOME's
+///   own (GtkSearchEntry's next-match / previous-match), instead of Windows' F3 / Shift+F3.
+/// - Redo shows **Shift+Ctrl+Z**, GNOME's spelling, with Ctrl+Y registered second (GtkTextView
+///   binds both).
+/// - Undo, Redo, Cut, Copy, Paste and Select All are registered and dispatch to the focused widget
+///   ([`CommandSpec::dispatches_to_focus`]); Delete has no chord.
+/// - **Quit** (GNOME's word) with GNOME's **Ctrl+Q** replaces Windows' chordless Exit.
 /// - Zen Mode is Shift+Ctrl+Return (GTK's name for Enter), Full Screen F11, Help F1 — free in GNOME.
+/// - Escape is no accelerator: the window's key controller handles it (§2.2).
 /// - The Share rows are gone (no share sheet on Linux).
 static ALL: [CommandSpec; 79] = [
     // ── File (§2.2) ───────────────────────────────────────────────────────────────────────
@@ -237,22 +279,23 @@ static ALL: [CommandSpec; 79] = [
     row(C::ExportTextBundle, "TextBundle\u{2026}", None, FILE_EXPORT, K::Item, false, 0),
     row(C::ExportDiagramSvg, "Diagram as SVG", None, FILE_EXPORT_DIAGRAMS, K::DynamicItems, false, 0),
     row(C::PdfPageSize, "PDF Page Size", None, FILE_EXPORT_PAGE_SIZE, K::DynamicRadios, false, 0),
-    row(C::Quit, "Quit md", chord("q", CTRL), FILE, K::Item, true, 4),
-    // ── Edit (§2.4) ───────────────────────────────────────────────────────────────────────
-    // Ctrl+Z, Shift+Ctrl+Z, Ctrl+X/C/V/A and Delete are shown but never registered: the focused
-    // widget owns them.
-    widget_owned(C::Undo, "Undo", chord("z", CTRL), 0),
-    widget_owned(C::Redo, "Redo", chord("z", CTRL_SHIFT), 0),
-    widget_owned(C::Cut, "Cut", chord("x", CTRL), 1),
-    widget_owned(C::Copy, "Copy", chord("c", CTRL), 1),
-    widget_owned(C::Paste, "Paste", chord("v", CTRL), 1),
-    widget_owned(C::Delete, "Delete", Some(Chord::key(keys::DELETE)), 1),
-    widget_owned(C::SelectAll, "Select All", chord("a", CTRL), 1),
-    row(C::Find, "Find\u{2026}", chord("f", CTRL), EDIT, K::Item, true, 2),
-    row(C::FindNext, "Find Next", chord("g", CTRL), EDIT, K::Item, true, 2),
-    row(C::FindPrevious, "Find Previous", chord("g", CTRL_SHIFT), EDIT, K::Item, true, 2),
-    row(C::Replace, "Replace\u{2026}", chord("h", CTRL), EDIT, K::Item, true, 2),
-    row(C::UseSelectionForFind, "Use Selection for Find", chord("e", CTRL), EDIT, K::Item, true, 2),
+    row(C::Quit, "Quit", chord("q", CTRL), FILE, K::Item, true, 4),
+    // ── Edit (§2.5) ───────────────────────────────────────────────────────────────────────
+    // Registered like every chord; the handlers act on the focused widget (§2.2). Delete has no
+    // chord: the Delete key stays with every entry.
+    editing(C::Undo, "Undo", chord("z", CTRL), 0),
+    also(editing(C::Redo, "Redo", chord("z", CTRL_SHIFT), 0), Chord::new("y", CTRL)),
+    editing(C::Cut, "Cut", chord("x", CTRL), 1),
+    editing(C::Copy, "Copy", chord("c", CTRL), 1),
+    editing(C::Paste, "Paste", chord("v", CTRL), 1),
+    editing(C::Delete, "Delete", None, 1),
+    editing(C::SelectAll, "Select All", chord("a", CTRL), 1),
+    // Edit ▸ Find, the Mac's submenu in the Mac's order, its divider before Use Selection for Find.
+    row(C::Find, "Find\u{2026}", chord("f", CTRL), EDIT_FIND, K::Item, true, 0),
+    row(C::Replace, "Find and Replace\u{2026}", chord("h", CTRL), EDIT_FIND, K::Item, true, 0),
+    row(C::FindNext, "Find Next", chord("g", CTRL), EDIT_FIND, K::Item, true, 0),
+    row(C::FindPrevious, "Find Previous", chord("g", CTRL_SHIFT), EDIT_FIND, K::Item, true, 0),
+    row(C::UseSelectionForFind, "Use Selection for Find", chord("e", CTRL), EDIT_FIND, K::Item, true, 1),
     // Typing (smart-typing.md §3.1): settings, ticked from the snapshot, under the same "Typing"
     // heading and worded identically on every md port — a static submenu of toggles.
     row(C::ContinueLists, "Continue Lists and Tables", None, EDIT_TYPING, K::Toggle, false, 0),
@@ -294,8 +337,8 @@ static ALL: [CommandSpec; 79] = [
     row(C::ExportBookEpub, "EPUB\u{2026}", None, BOOK_EXPORT, K::Item, false, 0),
     row(C::ExportBookLaTeX, "LaTeX\u{2026}", None, BOOK_EXPORT, K::Item, false, 0),
     // ── Go (§2.7) ─────────────────────────────────────────────────────────────────────────
-    row(C::PreviousArticle, "Previous Article", chord(keys::UP, ALT), GO, K::Item, false, 0),
-    row(C::NextArticle, "Next Article", chord(keys::DOWN, ALT), GO, K::Item, false, 0),
+    also(row(C::PreviousArticle, "Previous Article", chord(keys::UP, ALT), GO, K::Item, false, 0), CTRL_ALT_UP),
+    also(row(C::NextArticle, "Next Article", chord(keys::DOWN, ALT), GO, K::Item, false, 0), CTRL_ALT_DOWN),
     row(C::Contents, "Contents", None, GO_CONTENTS, K::DynamicItems, false, 0),
     row(C::Notes, "Notes", None, GO_NOTES, K::DynamicItems, false, 0),
     // ── Window (§2.8) ─────────────────────────────────────────────────────────────────────
@@ -307,16 +350,17 @@ static ALL: [CommandSpec; 79] = [
     row(C::Help, "md Help", Some(Chord::key(keys::F1)), HELP, K::Item, false, 0),
     row(C::PrivacyPolicy, "Privacy Policy", None, HELP, K::Item, false, 0),
     row(C::About, "About md", None, HELP, K::Item, false, 1),
-    // ── No menu row (§2.9) ────────────────────────────────────────────────────────────────
+    // ── No menu row, no accelerator (§2.2, §2.9) ──────────────────────────────────────────
     CommandSpec {
         id: C::Escape,
         title: "Escape",
         chord: Some(Chord::key(keys::ESCAPE)),
+        secondary_chord: None,
         path: None,
-        kind: K::Accelerator,
+        kind: K::WindowKey,
         port_only: true,
         group: 0,
-        root_accelerator: true,
+        dispatches_to_focus: false,
     },
 ];
 
@@ -325,21 +369,39 @@ pub fn all() -> &'static [CommandSpec] {
     &ALL
 }
 
-/// The rows the shell registers as window accelerators — a chord, and not one §2.4 leaves to the
-/// focused widget.
+/// The rows the shell registers with `set_accels_for_action` — every row with a chord except the
+/// [`CommandKind::WindowKey`] one (Escape), which the window's own key controller handles (§2.2).
 pub fn root_accelerators() -> &'static [&'static CommandSpec] {
     static ROOT: OnceLock<Vec<&'static CommandSpec>> = OnceLock::new();
-    ROOT.get_or_init(|| ALL.iter().filter(|s| s.chord.is_some() && s.root_accelerator).collect())
+    ROOT.get_or_init(|| ALL.iter().filter(|s| s.chord.is_some() && s.kind != CommandKind::WindowKey).collect())
 }
 
-/// The root command a chord runs, or `None`: an editing key §2.4 leaves to the focused widget, or
-/// no command's chord at all.
+/// The command a registered chord runs — its first or its second accelerator — or `None`: Escape
+/// (never registered), or no command's chord at all.
 pub fn root_accelerator_for(chord: Chord) -> Option<CommandId> {
     static BY_CHORD: OnceLock<HashMap<Chord, CommandId>> = OnceLock::new();
     BY_CHORD
-        .get_or_init(|| root_accelerators().iter().filter_map(|s| s.chord.map(|c| (c, s.id))).collect())
+        .get_or_init(|| root_accelerators().iter().flat_map(|s| s.chords().map(move |c| (c, s.id))).collect())
         .get(&chord)
         .copied()
+}
+
+impl CommandSpec {
+    /// The chords registered for this row, shown one first: [`CommandSpec::chord`], then
+    /// [`CommandSpec::secondary_chord`].
+    pub fn chords(&self) -> impl Iterator<Item = Chord> + use<> {
+        self.chord.into_iter().chain(self.secondary_chord)
+    }
+
+    /// What the shell passes to `gtk_application_set_accels_for_action` for this row, in order
+    /// (GTK shows the first beside the row): `["<Shift><Control>z", "<Control>y"]` for Redo.
+    /// Empty for a row with no chord and for [`CommandKind::WindowKey`], which is never registered.
+    pub fn accelerators(&self) -> Vec<String> {
+        if self.kind == CommandKind::WindowKey {
+            return Vec::new();
+        }
+        self.chords().map(|c| c.accelerator()).collect()
+    }
 }
 
 /// The row for `id` (md.win's `CommandTable.For`).
@@ -378,6 +440,7 @@ fn submenu_group(path: &MenuPath) -> u8 {
         p if p == FILE_EXPORT => 3,
         p if p == FILE_EXPORT_DIAGRAMS => 1,
         p if p == FILE_EXPORT_PAGE_SIZE => 2,
+        p if p == EDIT_FIND => 2,
         p if p == EDIT_TYPING => 3,
         p if p == FORMAT_HEADING || p == BOOK_EXPORT || p == GO_CONTENTS || p == GO_NOTES => 1,
         _ => 0,

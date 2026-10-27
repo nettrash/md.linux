@@ -13,8 +13,9 @@
 /// - md.win's `ShareSource`, `ShareRenderedPdf` and `ShareBookPdf` are gone: Linux has no system
 ///   share sheet (see `seams`), so File ▸ Share ▸ and Book ▸ Share Book as PDF do not exist. Export
 ///   ▸ PDF… and Export Book ▸ PDF… write the same files.
-/// - md.win's `Exit` is [`CommandId::Quit`]: the Mac's "Quit md" (its app menu row, ⌘Q) moved to the
-///   end of File — where md.win put Exit — with GNOME's Ctrl+Q.
+/// - md.win's `Exit` is [`CommandId::Quit`]: the Mac's app-menu row (⌘Q) moved to the end of File
+///   — where md.win put Exit — titled "Quit", GNOME's word, with GNOME's Ctrl+Q (shell-design
+///   §2.9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CommandId {
     // File (§2.2)
@@ -53,7 +54,8 @@ pub enum CommandId {
     Find,
     FindNext,
     FindPrevious,
-    /// Edit ▸ Replace…: the find bar with the replacement field focused (shell-design §3.5).
+    /// Edit ▸ Find ▸ Find and Replace…: the find bar with the replacement row shown and its field
+    /// focused (shell-design §3.6).
     Replace,
     UseSelectionForFind,
     /// Edit ▸ Typing ▸ Continue Lists and Tables: the `md.continueLists` toggle (smart-typing.md
@@ -115,8 +117,10 @@ pub enum CommandId {
     PrivacyPolicy,
     About,
 
-    /// Not a menu row: a window accelerator that is enabled only while Zen is on or the find bar is
-    /// open (§2.9), so the editor keeps Esc otherwise.
+    /// Not a menu row and not an accelerator: the Escape key as the window's own key controller
+    /// sees it in the bubble phase, after everything below it declined the key (shell-design
+    /// §2.2). Enabled only while Zen is on or the find bar is open, so the key is otherwise left
+    /// alone.
     Escape,
 }
 
@@ -221,6 +225,117 @@ impl CommandId {
         }
         name.replace("la-te-x", "latex")
     }
+
+    /// Which action group the GTK shell puts this command in (shell-design §2.2): `app.` for the
+    /// commands whose state is the application's — opening things, the recent list, the examples,
+    /// Quit, the typing and page-size settings, the Book menu and Help — and `win.` for everything
+    /// that acts on one window. Exhaustive, so a new id cannot be left without a scope.
+    pub fn scope(self) -> ActionScope {
+        use CommandId as C;
+        match self {
+            C::New
+            | C::Open
+            | C::OpenRecentEntry
+            | C::ClearRecent
+            | C::OpenTextBundleFolder
+            | C::Example
+            | C::ExampleBook
+            | C::Quit
+            | C::ContinueLists
+            | C::CapitalizeSentences
+            | C::WrapSelection
+            | C::PdfPageSize
+            | C::NewBook
+            | C::OpenBook
+            | C::ShowBook
+            | C::CloseBook
+            | C::PrintBook
+            | C::ExportBookPdf
+            | C::ExportBookEpub
+            | C::ExportBookLaTeX
+            | C::Help
+            | C::PrivacyPolicy
+            | C::About => ActionScope::App,
+            C::Close
+            | C::Save
+            | C::SaveAs
+            | C::Duplicate
+            | C::Rename
+            | C::MoveTo
+            | C::RevertToSaved
+            | C::Print
+            | C::ExportPdf
+            | C::ExportHtml
+            | C::ExportEpub
+            | C::ExportLaTeX
+            | C::ExportTextBundle
+            | C::ExportDiagramSvg
+            | C::Undo
+            | C::Redo
+            | C::Cut
+            | C::Copy
+            | C::Paste
+            | C::Delete
+            | C::SelectAll
+            | C::Find
+            | C::FindNext
+            | C::FindPrevious
+            | C::Replace
+            | C::UseSelectionForFind
+            | C::Bold
+            | C::Italic
+            | C::InlineCode
+            | C::Strikethrough
+            | C::Link
+            | C::Heading1
+            | C::Heading2
+            | C::Heading3
+            | C::Heading4
+            | C::Heading5
+            | C::Heading6
+            | C::BulletList
+            | C::TaskList
+            | C::Quote
+            | C::Indent
+            | C::Outdent
+            | C::ViewEdit
+            | C::ViewSplit
+            | C::ViewPreview
+            | C::ZenMode
+            | C::ShowSidebar
+            | C::FullScreen
+            | C::PreviousArticle
+            | C::NextArticle
+            | C::Contents
+            | C::Notes
+            | C::Minimize
+            | C::Zoom
+            | C::ActivateWindow
+            | C::Escape => ActionScope::Window,
+        }
+    }
+}
+
+/// The two `GActionGroup`s a command can live in (shell-design §2.2). While an alert is up in a
+/// window, every [`ActionScope::Window`] command of that window is disabled
+/// ([`ShellSnapshot::dialog_open`](super::ShellSnapshot::dialog_open)); the application's own
+/// commands stay live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ActionScope {
+    /// `app.` — one action for the whole process (`gtk::Application`'s action map).
+    App,
+    /// `win.` — one action per window (`adw::ApplicationWindow`'s action map).
+    Window,
+}
+
+impl ActionScope {
+    /// The prefix of a detailed action name: `"app"` or `"win"`.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            ActionScope::App => "app",
+            ActionScope::Window => "win",
+        }
+    }
 }
 
 /// What the menu builder makes of a [`CommandSpec`](super::CommandSpec). The GTK shapes are
@@ -240,6 +355,9 @@ pub enum CommandKind {
     /// One radio item per snapshot row (PDF Page Size): a stateful string action whose state is the
     /// ticked row's target.
     DynamicRadios,
-    /// No menu row at all — the command exists only as an accelerator ([`CommandId::Escape`]).
-    Accelerator,
+    /// No menu row and no registered accelerator: a key the window's own `gtk::EventControllerKey`
+    /// dispatches in the bubble phase, once nothing below it handled the key
+    /// ([`CommandId::Escape`], shell-design §2.2). Registering Escape with
+    /// `set_accels_for_action` would take it from input methods, popovers and the find field.
+    WindowKey,
 }

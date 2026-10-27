@@ -24,7 +24,7 @@ pub mod view_mode_controller;
 pub mod zen_controller;
 
 pub use derived_text::DerivedText;
-pub use derived_text_scheduler::{DerivedTextScheduler, RunOffThread};
+pub use derived_text_scheduler::DerivedTextScheduler;
 pub use document_window_state::{DocumentWindowState, IdentityMemo};
 pub use scroll_sync::ScrollSync;
 pub use scroll_sync_guard::{ApplyingScope, ScrollSyncGuard};

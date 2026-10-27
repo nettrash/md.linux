@@ -15,6 +15,7 @@
 //! | [`FakeAlerts`] | [`Alerts`] | `FakeAlerts.cs` |
 //! | [`FakePickers`] | [`Pickers`] | `FakePickers.cs` |
 //! | [`FakeWordCounter`] | [`WordCounter`] | `FakeWordCounter.cs` |
+//! | [`FakeOffThread`] | [`OffThread`] | (md.win's tests pass `work => work()` or queue the work) |
 //! | [`FakePreviewSurface`] | [`PreviewSurface`] | `FakePreviewSurface.cs` |
 //! | [`FakeRenderSurface`], [`FakeRenderSurfaceFactory`] | [`RenderSurface`], [`RenderSurfaceFactory`] | `FakeRenderSurface.cs` |
 //! | [`FakeSettingsStore`] | [`SettingsStore`] | `FakeSettingsStore.cs` |
@@ -49,6 +50,7 @@ mod fake_document_registry;
 mod fake_file_identity;
 mod fake_file_system;
 mod fake_file_watcher;
+mod fake_off_thread;
 mod fake_pickers;
 mod fake_preview_surface;
 mod fake_render_surface;
@@ -66,6 +68,7 @@ pub use fake_document_registry::FakeDocumentRegistry;
 pub use fake_file_identity::FakeFileIdentity;
 pub use fake_file_system::FakeFileSystem;
 pub use fake_file_watcher::FakeFileWatcher;
+pub use fake_off_thread::FakeOffThread;
 pub use fake_pickers::{FakePickers, SaveCall};
 pub use fake_preview_surface::FakePreviewSurface;
 pub use fake_render_surface::{FakeRenderSurface, FakeRenderSurfaceFactory};
@@ -76,7 +79,9 @@ pub use fake_ui_thread::FakeUiThread;
 pub use fake_word_counter::FakeWordCounter;
 
 pub use crate::event::{Event, HandlerId};
-pub use crate::exec::{CancelToken, Cancelled, Completion, LocalBoxFuture, LocalExecutor, Spawner, ready};
+pub use crate::exec::{
+    CancelToken, Cancelled, Completion, LocalBoxFuture, LocalExecutor, Spawner, ThreadOffThread, ready,
+};
 pub use crate::seams::*;
 pub use crate::settings::{InMemorySettingsStore, SettingValue, SettingsStore};
 
