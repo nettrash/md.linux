@@ -11,6 +11,14 @@ repository.workspace = true
 [dependencies]
 md-core.workspace = true
 md-logic.workspace = true
+# Feature flags match Ubuntu 26.04's libraries (docs/linux-facts.md): GTK 4.22, libadwaita 1.9,
+# WebKitGTK 6.0 2.52, GLib 2.88. A flag newer than the system library links but fails at
+# runtime with an undefined symbol, so never raise one past what the target ships.
+gtk = { package = "gtk4", version = "0.11", features = ["v4_22"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
+webkit = { package = "webkit6", version = "0.6", features = ["v2_52"] }
+glib = { version = "0.22", features = ["v2_88"] }
+gio = { version = "0.22", features = ["v2_88"] }
 
 [lints]
 workspace = true
