@@ -116,7 +116,14 @@ pub struct ShellSnapshot {
     pub sidebar_open: bool,
     /// The window is full screen (`GtkWindow:fullscreened`) — View's row reads "Exit Full Screen".
     pub is_full_screen: bool,
-    /// The find bar is showing; with `zen_active` it is what makes Esc a command (§2.9).
+    /// (Linux) An alert is up in this window. `adw::AlertDialog` is presented *inside* the window,
+    /// so the window's shortcuts would still reach the window behind it; while this is set every
+    /// [`ActionScope::Window`](super::ActionScope::Window) command is disabled, as the Mac's sheet
+    /// blocks the window's menu items (shell-design §2.2, §7.8). The application's own commands
+    /// stay live.
+    pub dialog_open: bool,
+    /// The find bar is showing (a document window's or the Book window's); with `zen_active` it is
+    /// what makes Esc a command (§2.9).
     pub find_bar_open: bool,
     /// The `md.continueLists` setting (Edit ▸ Typing ▸ Continue Lists and Tables' tick). Default
     /// true.
@@ -159,6 +166,7 @@ impl ShellSnapshot {
             pdf_page_size_id: PageSize::DEFAULT_ID.to_string(),
             sidebar_open: false,
             is_full_screen: false,
+            dialog_open: false,
             find_bar_open: false,
             continue_lists: true,
             capitalize_sentences: true,

@@ -3,15 +3,20 @@
 //! Mac's wording to the character, and the eight menus with the dividers §2 draws. Everything the
 //! GTK menu builder does is a walk over what is asserted here.
 //!
-//! LINUX: the chords are GTK's (see `commands::chord`); the Share rows are gone; Exit is "Quit md"
-//! with Ctrl+Q. The tests that pinned those rows pin the Linux ones, and the Linux-only tests at
-//! the end pin the chord decisions against GNOME's and GtkTextView's own bindings.
+//! LINUX: the chords are GTK's (see `commands::chord`); the Share rows are gone; Exit is "Quit"
+//! with Ctrl+Q; the find rows sit in Edit ▸ Find with the Mac's titles; the editing rows are
+//! registered and dispatch to the focused widget, Delete has no chord, Escape is no accelerator,
+//! and Redo and Previous / Next Article carry a second chord (shell-design §2.2, §2.9). The tests
+//! that pinned md.win's rows pin the Linux ones, and the Linux-only tests at the end pin the chord
+//! decisions against GNOME's and GtkTextView's own bindings, and the `app.` / `win.` scopes.
 
 use std::collections::{HashMap, HashSet};
 
 use md_core::markdown::block::OutlineEntry;
 use md_logic::commands::command_table::{self, EXIT_FULL_SCREEN_TITLE, MENU_TITLES};
-use md_logic::commands::{Chord, CommandId, CommandKind, KeyModifiers, MenuNode, MenuPath, ShellSnapshot, keys};
+use md_logic::commands::{
+    ActionScope, Chord, CommandId, CommandKind, KeyModifiers, MenuNode, MenuPath, ShellSnapshot, keys,
+};
 use md_logic::strings::books;
 
 const CTRL: KeyModifiers = KeyModifiers::CTRL;
@@ -33,8 +38,9 @@ fn every_command_id_appears_exactly_once() {
 
 #[test]
 fn no_chord_is_claimed_twice() {
+    // LINUX: second chords included.
     let mut seen: HashMap<Chord, usize> = HashMap::new();
-    for chord in command_table::all().iter().filter_map(|s| s.chord) {
+    for chord in command_table::all().iter().flat_map(|s| s.chords()) {
         *seen.entry(chord).or_default() += 1;
     }
     let duplicates: Vec<String> = seen.iter().filter(|(_, n)| **n > 1).map(|(c, _)| c.display_text()).collect();
@@ -43,15 +49,16 @@ fn no_chord_is_claimed_twice() {
 
 #[test]
 fn every_row_has_a_path_except_the_accelerator_only_one() {
+    // LINUX: md.win's accelerator-only Escape is a key the window's controller handles (§2.2).
     for spec in command_table::all() {
-        if spec.kind == CommandKind::Accelerator {
+        if spec.kind == CommandKind::WindowKey {
             assert!(spec.path.is_none());
         } else {
             assert!(spec.path.is_some(), "{:?}", spec.id);
         }
     }
     let accelerators: Vec<CommandId> =
-        command_table::all().iter().filter(|s| s.kind == CommandKind::Accelerator).map(|s| s.id).collect();
+        command_table::all().iter().filter(|s| s.kind == CommandKind::WindowKey).map(|s| s.id).collect();
     assert_eq!(accelerators, vec![CommandId::Escape]);
 }
 
@@ -99,8 +106,9 @@ const TITLES: [(CommandId, &str); 62] = [
     (CommandId::ExportTextBundle, "TextBundle\u{2026}"),
     (CommandId::ExportDiagramSvg, "Diagram as SVG"),
     (CommandId::PdfPageSize, "PDF Page Size"),
-    // LINUX: the Mac's own app-menu row, moved to File where md.win put "Exit".
-    (CommandId::Quit, "Quit md"),
+    // LINUX: the Mac's app-menu row, moved to File where md.win put "Exit", in GNOME's word
+    // (shell-design §2.9).
+    (CommandId::Quit, "Quit"),
     (CommandId::Undo, "Undo"),
     (CommandId::Redo, "Redo"),
     (CommandId::Cut, "Cut"),
@@ -111,7 +119,8 @@ const TITLES: [(CommandId, &str); 62] = [
     (CommandId::Find, "Find\u{2026}"),
     (CommandId::FindNext, "Find Next"),
     (CommandId::FindPrevious, "Find Previous"),
-    (CommandId::Replace, "Replace\u{2026}"),
+    // LINUX: the Mac's title (md.win: "Replace…").
+    (CommandId::Replace, "Find and Replace\u{2026}"),
     (CommandId::UseSelectionForFind, "Use Selection for Find"),
     (CommandId::ContinueLists, "Continue Lists and Tables"),
     (CommandId::CapitalizeSentences, "Capitalize Sentences"),
@@ -183,7 +192,7 @@ fn exit_full_screen_is_the_other_half_of_the_full_screen_row() {
 /// Ubuntu 26.04 image with GTK 4.22.4) and as `gtk_accelerator_name` spells it (the string the
 /// shell hands `set_accels_for_action`; each parsed, `gtk_accelerator_valid`, and round-tripped
 /// unchanged).
-const CHORDS: [(CommandId, &str, &str); 45] = [
+const CHORDS: [(CommandId, &str, &str); 44] = [
     (CommandId::New, "Ctrl+N", "<Control>n"),
     (CommandId::Open, "Ctrl+O", "<Control>o"),
     (CommandId::Close, "Ctrl+W", "<Control>w"),
@@ -193,12 +202,13 @@ const CHORDS: [(CommandId, &str, &str); 45] = [
     // LINUX: GNOME's Quit; md.win's Exit had no chord.
     (CommandId::Quit, "Ctrl+Q", "<Control>q"),
     (CommandId::Undo, "Ctrl+Z", "<Control>z"),
-    // LINUX: GNOME's Redo (GtkTextView binds it and Ctrl+Y alike); md.win shows Ctrl+Y.
+    // LINUX: GNOME's Redo shown, Ctrl+Y registered second (GtkTextView binds both); md.win shows
+    // Ctrl+Y.
     (CommandId::Redo, "Shift+Ctrl+Z", "<Shift><Control>z"),
     (CommandId::Cut, "Ctrl+X", "<Control>x"),
     (CommandId::Copy, "Ctrl+C", "<Control>c"),
     (CommandId::Paste, "Ctrl+V", "<Control>v"),
-    (CommandId::Delete, "Delete", "Delete"),
+    // LINUX: Delete has no chord — registering the Delete key would take it from every entry.
     (CommandId::SelectAll, "Ctrl+A", "<Control>a"),
     (CommandId::Find, "Ctrl+F", "<Control>f"),
     // LINUX: the Mac's ⌘G / ⇧⌘G and GNOME's own; md.win's F3 / Shift+F3.
@@ -212,10 +222,12 @@ const CHORDS: [(CommandId, &str, &str); 45] = [
     (CommandId::ZenMode, "Shift+Ctrl+Return", "<Shift><Control>Return"),
     (CommandId::FullScreen, "F11", "F11"),
     (CommandId::ShowBook, "Shift+Ctrl+B", "<Shift><Control>b"),
-    // LINUX: GNOME binds Ctrl+Alt+Up/Down to switch-to-workspace-up/down.
+    // LINUX: GNOME binds Ctrl+Alt+Up/Down to switch-to-workspace-up/down; they are the second
+    // chords here.
     (CommandId::PreviousArticle, "Alt+Up", "<Alt>Up"),
     (CommandId::NextArticle, "Alt+Down", "<Alt>Down"),
     (CommandId::Help, "F1", "F1"),
+    // LINUX: the key the window's controller matches; never registered (§2.2).
     (CommandId::Escape, "Escape", "Escape"),
     // Format (1.6, formatting.md §5) — the family's chords, nettrash's 2026-10-10 decision.
     (CommandId::Bold, "Ctrl+B", "<Control>b"),
@@ -254,8 +266,8 @@ fn chord_is_the_accelerator_gtk_parses() {
 }
 
 #[test]
-fn only_these_forty_five_rows_carry_a_chord() {
-    // LINUX: md.win's forty-four, plus Quit md.
+fn only_these_forty_four_rows_carry_a_chord() {
+    // LINUX: md.win's forty-four, plus Quit, less Delete.
     let mut with_chords: Vec<CommandId> =
         command_table::all().iter().filter(|s| s.chord.is_some()).map(|s| s.id).collect();
     let mut expected: Vec<CommandId> = CHORDS.iter().map(|(id, _, _)| *id).collect();
@@ -272,11 +284,13 @@ fn the_app_api_doc_carries_the_tables_own_counts_and_its_whole_command_id_listin
 }
 
 #[test]
-fn the_editors_own_keys_are_shown_but_never_registered_on_the_root() {
-    // §2.4: Ctrl+Z, Shift+Ctrl+Z, Ctrl+X/C/V/A and Delete stay with the focused widget — the web
-    // view must keep Ctrl+C on a preview selection, and Delete must delete a character, not a
-    // selection's worth.
-    let widget_owned = [
+fn the_editors_own_keys_are_registered_and_dispatch_to_the_focused_widget() {
+    // md.win: The_editors_own_keys_are_shown_but_never_registered_on_the_root. LINUX DECISION
+    // (§2.2): GtkPopoverMenu documents no attribute that shows a chord which is not an
+    // accelerator, so Ctrl+Z, Shift+Ctrl+Z (and Ctrl+Y), Ctrl+X/C/V/A are registered and their
+    // handlers act on the focused widget — the web view still copies its own selection. Delete
+    // dispatches too, from its menu row only: it has no chord.
+    let editing = [
         CommandId::Undo,
         CommandId::Redo,
         CommandId::Cut,
@@ -285,20 +299,22 @@ fn the_editors_own_keys_are_shown_but_never_registered_on_the_root() {
         CommandId::Delete,
         CommandId::SelectAll,
     ];
-    for id in widget_owned {
-        let spec = command_table::spec(id);
-        assert!(spec.chord.is_some());
-        assert!(!spec.root_accelerator);
-    }
-    let mut not_root: Vec<CommandId> =
-        command_table::all().iter().filter(|s| !s.root_accelerator).map(|s| s.id).collect();
-    not_root.sort();
-    let mut expected = widget_owned.to_vec();
+    let mut dispatching: Vec<CommandId> =
+        command_table::all().iter().filter(|s| s.dispatches_to_focus).map(|s| s.id).collect();
+    dispatching.sort();
+    let mut expected = editing.to_vec();
     expected.sort();
-    assert_eq!(expected, not_root);
-    assert!(command_table::root_accelerators().iter().all(|s| !widget_owned.contains(&s.id)));
-    // LINUX: md.win's 37, plus Quit md's Ctrl+Q.
-    assert_eq!(command_table::root_accelerators().len(), 38);
+    assert_eq!(expected, dispatching);
+    for id in editing {
+        let spec = command_table::spec(id);
+        assert_eq!(spec.path, Some(MenuPath::menu("Edit")), "{id:?}");
+        let registered = command_table::root_accelerators().iter().any(|s| s.id == id);
+        assert_eq!(registered, id != CommandId::Delete, "{id:?}");
+    }
+    assert!(command_table::spec(CommandId::Delete).chord.is_none());
+    // md.win's 37 root accelerators, plus Quit's Ctrl+Q, plus the six editing rows with a chord,
+    // less Escape.
+    assert_eq!(command_table::root_accelerators().len(), 43);
 }
 
 #[test]
@@ -363,7 +379,7 @@ fn rows(menu: &MenuNode) -> Vec<&'static str> {
 
 #[test]
 fn file_reads_as_section_2_2_does_dividers_included() {
-    // LINUX: no Share ▸ beside Export ▸, and Quit md where md.win has Exit.
+    // LINUX: no Share ▸ beside Export ▸, and Quit where md.win has Exit.
     assert_eq!(
         rows(menu("File")),
         [
@@ -385,7 +401,7 @@ fn file_reads_as_section_2_2_does_dividers_included() {
             "—",
             "Export",
             "—",
-            "Quit md",
+            "Quit",
         ]
     );
 }
@@ -414,27 +430,33 @@ fn files_submenus_hold_what_section_2_2_says() {
 
 #[test]
 fn edit_reads_as_section_2_4_does() {
+    // LINUX: the find rows in the Mac's Edit ▸ Find submenu (md.win flattened them).
     assert_eq!(
         rows(menu("Edit")),
-        [
-            "Undo",
-            "Redo",
-            "—",
-            "Cut",
-            "Copy",
-            "Paste",
-            "Delete",
-            "Select All",
-            "—",
-            "Find\u{2026}",
-            "Find Next",
-            "Find Previous",
-            "Replace\u{2026}",
-            "Use Selection for Find",
-            "—",
-            "Typing",
-        ]
+        ["Undo", "Redo", "—", "Cut", "Copy", "Paste", "Delete", "Select All", "—", "Find", "—", "Typing"]
     );
+}
+
+#[test]
+fn edit_find_holds_the_macs_rows_in_the_macs_order() {
+    // md.macOS mdApp.swift: Find…, Find and Replace…, Find Next, Find Previous, a divider, Use
+    // Selection for Find (shell-design §2.5).
+    let find = child(menu("Edit"), "Find");
+    assert!(find.command.is_none());
+    assert!(find.separator_before);
+    assert_eq!(
+        rows(find),
+        ["Find\u{2026}", "Find and Replace\u{2026}", "Find Next", "Find Previous", "—", "Use Selection for Find",]
+    );
+    for id in [
+        CommandId::Find,
+        CommandId::Replace,
+        CommandId::FindNext,
+        CommandId::FindPrevious,
+        CommandId::UseSelectionForFind,
+    ] {
+        assert_eq!(command_table::spec(id).path, Some(MenuPath::submenu("Edit", "Find")), "{id:?}");
+    }
 }
 
 #[test]
@@ -485,6 +507,7 @@ fn the_static_submenus_are_the_ones_the_four_ports_share() {
             "File ▸ Export",
             "File ▸ Export ▸ Diagram as SVG",
             "File ▸ Export ▸ PDF Page Size",
+            "Edit ▸ Find",
             "Edit ▸ Typing",
             "Format ▸ Heading",
             "Book ▸ Export Book",
@@ -524,7 +547,8 @@ fn format_reads_as_the_formatting_spec_does() {
     for id in commands.iter().copied() {
         let spec = command_table::spec(id);
         assert_eq!(spec.kind, CommandKind::Item);
-        assert!(spec.root_accelerator);
+        assert!(command_table::root_accelerators().iter().any(|s| s.id == id));
+        assert!(!spec.dispatches_to_focus);
         assert!(!spec.port_only);
     }
     assert_eq!(commands.len(), 16);
@@ -532,7 +556,7 @@ fn format_reads_as_the_formatting_spec_does() {
 
 #[test]
 fn no_two_rows_share_a_chord() {
-    let chords: Vec<Chord> = command_table::all().iter().filter_map(|s| s.chord).collect();
+    let chords: Vec<Chord> = command_table::all().iter().flat_map(|s| s.chords()).collect();
     let distinct: HashSet<Chord> = chords.iter().copied().collect();
     assert_eq!(chords.len(), distinct.len());
 }
@@ -624,7 +648,7 @@ fn the_page_size_radios_share_one_group() {
 
 #[test]
 fn only_the_designs_port_only_rows_are_marked_so() {
-    // LINUX: md.win's "(Win)" set, with Quit md in Exit's place.
+    // LINUX: md.win's "(Win)" set, with Quit in Exit's place.
     let mut expected = vec![
         CommandId::OpenTextBundleFolder,
         CommandId::Quit,
@@ -645,15 +669,23 @@ fn only_the_designs_port_only_rows_are_marked_so() {
 }
 
 #[test]
-fn root_accelerator_for_answers_the_root_chords_and_not_the_editing_keys() {
+fn root_accelerator_for_answers_every_registered_chord_and_nothing_else() {
+    // md.win: …_and_not_the_editing_keys. LINUX: the editing keys are registered (§2.2), the
+    // second chords answer too, and Escape is not an accelerator.
     let find_next = command_table::spec(CommandId::FindNext).chord.unwrap();
     assert_eq!(command_table::root_accelerator_for(find_next), Some(CommandId::FindNext));
     assert_eq!(command_table::root_accelerator_for(Chord::new("f", CTRL)), Some(CommandId::Find));
     let copy = command_table::spec(CommandId::Copy).chord.unwrap();
-    assert_eq!(command_table::root_accelerator_for(copy), None);
+    assert_eq!(command_table::root_accelerator_for(copy), Some(CommandId::Copy));
+    assert_eq!(command_table::root_accelerator_for(Chord::new("y", CTRL)), Some(CommandId::Redo));
+    assert_eq!(command_table::root_accelerator_for(Chord::new(keys::DOWN, CTRL | ALT)), Some(CommandId::NextArticle));
+    assert_eq!(command_table::root_accelerator_for(Chord::key(keys::ESCAPE)), None);
+    assert_eq!(command_table::root_accelerator_for(Chord::key(keys::DELETE)), None);
     assert_eq!(command_table::root_accelerator_for(Chord::new("g", ALT)), None);
     for spec in command_table::root_accelerators() {
-        assert_eq!(command_table::root_accelerator_for(spec.chord.unwrap()), Some(spec.id));
+        for chord in spec.chords() {
+            assert_eq!(command_table::root_accelerator_for(chord), Some(spec.id));
+        }
     }
 }
 
@@ -740,20 +772,105 @@ fn no_root_chord_is_one_the_desktop_or_the_editor_already_owns() {
         .copied()
         .collect();
     for spec in command_table::root_accelerators() {
+        if spec.dispatches_to_focus {
+            // The editing rows register the text view's own keys and hand them back to whichever
+            // widget has focus (the next test).
+            continue;
+        }
         let accelerator = spec.chord.unwrap().accelerator();
         assert!(!taken.contains(accelerator.as_str()), "{:?} takes {accelerator}", spec.id);
+        // A second chord may be one GNOME grabs first — that is why it is second — but never one
+        // the editor binds.
+        if let Some(secondary) = spec.secondary_chord {
+            let secondary = secondary.accelerator();
+            assert!(!TEXT_VIEW_BINDINGS.contains(&secondary.as_str()), "{:?} takes {secondary}", spec.id);
+        }
     }
-    // The clash that moved Previous / Next Article off md.win's chords.
+    // The clash that moved Previous / Next Article off md.win's chords, and kept them second.
     assert!(taken.contains("<Control><Alt>Up") && taken.contains("<Control><Alt>Down"));
 }
 
 #[test]
-fn the_widget_owned_rows_show_what_the_text_view_binds() {
+fn the_editing_rows_register_what_the_text_view_binds() {
+    // md.win: The_widget_owned_rows_show_what_the_text_view_binds — Ctrl+Y included now.
     for id in
         [CommandId::Undo, CommandId::Redo, CommandId::Cut, CommandId::Copy, CommandId::Paste, CommandId::SelectAll]
     {
-        let accelerator = command_table::spec(id).chord.unwrap().accelerator();
-        assert!(TEXT_VIEW_BINDINGS.contains(&accelerator.as_str()), "{id:?}: {accelerator}");
+        for accelerator in command_table::spec(id).accelerators() {
+            assert!(TEXT_VIEW_BINDINGS.contains(&accelerator.as_str()), "{id:?}: {accelerator}");
+        }
+    }
+}
+
+#[test]
+fn three_rows_carry_a_second_chord_registered_after_the_shown_one() {
+    // §2.8, §2.9: GTK labels a row with its first accelerator, so the second never shows.
+    let seconds: Vec<(CommandId, String)> =
+        command_table::all().iter().filter_map(|s| s.secondary_chord.map(|c| (s.id, c.accelerator()))).collect();
+    assert_eq!(
+        seconds,
+        [
+            (CommandId::Redo, "<Control>y".to_string()),
+            (CommandId::PreviousArticle, "<Control><Alt>Up".to_string()),
+            (CommandId::NextArticle, "<Control><Alt>Down".to_string()),
+        ]
+    );
+    assert_eq!(command_table::spec(CommandId::Redo).accelerators(), ["<Shift><Control>z", "<Control>y"]);
+    assert_eq!(command_table::spec(CommandId::PreviousArticle).accelerators(), ["<Alt>Up", "<Control><Alt>Up"]);
+    assert_eq!(command_table::spec(CommandId::NextArticle).accelerators(), ["<Alt>Down", "<Control><Alt>Down"]);
+    assert_eq!(command_table::spec(CommandId::Save).accelerators(), ["<Control>s"]);
+    assert!(command_table::spec(CommandId::Rename).accelerators().is_empty());
+}
+
+#[test]
+fn escape_is_a_key_the_window_handles_and_never_an_accelerator() {
+    // §2.2: registered, Escape would be taken from input methods, popovers and the find field.
+    let escape = command_table::spec(CommandId::Escape);
+    assert_eq!(escape.kind, CommandKind::WindowKey);
+    assert_eq!(escape.chord, Some(Chord::key(keys::ESCAPE)));
+    assert!(escape.accelerators().is_empty());
+    assert!(command_table::root_accelerators().iter().all(|s| s.id != CommandId::Escape));
+    assert!(command_table::root_accelerators().iter().all(|s| s.kind != CommandKind::WindowKey));
+}
+
+/// shell-design §2.2's `app.` list, transcribed; everything else is `win.`.
+const APP_SCOPED: [CommandId; 23] = [
+    CommandId::New,
+    CommandId::Open,
+    CommandId::OpenRecentEntry,
+    CommandId::ClearRecent,
+    CommandId::OpenTextBundleFolder,
+    CommandId::Example,
+    CommandId::ExampleBook,
+    CommandId::Quit,
+    CommandId::ContinueLists,
+    CommandId::CapitalizeSentences,
+    CommandId::WrapSelection,
+    CommandId::PdfPageSize,
+    CommandId::NewBook,
+    CommandId::OpenBook,
+    CommandId::ShowBook,
+    CommandId::CloseBook,
+    CommandId::PrintBook,
+    CommandId::ExportBookPdf,
+    CommandId::ExportBookEpub,
+    CommandId::ExportBookLaTeX,
+    CommandId::Help,
+    CommandId::PrivacyPolicy,
+    CommandId::About,
+];
+
+#[test]
+fn every_command_lives_in_the_action_group_section_2_2_names() {
+    for id in CommandId::ALL {
+        let expected = if APP_SCOPED.contains(&id) { ActionScope::App } else { ActionScope::Window };
+        assert_eq!(id.scope(), expected, "{id:?}");
+    }
+    assert_eq!(ActionScope::App.prefix(), "app");
+    assert_eq!(ActionScope::Window.prefix(), "win");
+    // The rows a window acts on are the window's, File's own included.
+    for id in [CommandId::Close, CommandId::Save, CommandId::Print, CommandId::ExportPdf, CommandId::FullScreen] {
+        assert_eq!(id.scope(), ActionScope::Window, "{id:?}");
     }
 }
 

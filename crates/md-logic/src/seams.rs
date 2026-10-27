@@ -14,6 +14,7 @@
 //! md.win's `IShare` has no counterpart: Linux has no system share sheet (see the deviations in
 //! docs/shell-design.md).
 
+use std::any::Any;
 use std::fmt;
 use std::io;
 use std::time::{Duration, Instant};
@@ -190,9 +191,51 @@ pub trait Pickers {
     fn pick_folder(&self, title: Option<String>) -> LocalBoxFuture<'static, Option<String>>;
 }
 
-/// The footer's word count.
-pub trait WordCounter {
+/// The footer's word count. `Send + Sync` because the derived text is computed off the UI thread
+/// ([`OffThread`]) and the counter goes with it.
+pub trait WordCounter: Send + Sync {
     fn count(&self, text: &str) -> usize;
+}
+
+/// What [`OffThread`] hands back: the work's result, type-erased so the seam stays a trait object.
+/// `run`, on `dyn OffThread`, puts the type back.
+pub type OffThreadValue = Box<dyn Any + Send>;
+
+/// Work for [`OffThread`]: it runs on another thread, so it and its result are `Send`.
+pub type OffThreadWork = Box<dyn FnOnce() -> OffThreadValue + Send>;
+
+/// Work that must not run on the UI thread — md.win's `RunOffThread` (`Task.Run`), for the derived
+/// text (shell-design §5.5, §15). The work owns its inputs (a `String`) and returns plain `Send`
+/// data; the future hands the result back on whatever thread polls it, which is the UI thread when
+/// a [`Spawner`](crate::exec::Spawner) drives it. App: GLib's blocking pool, whose `JoinHandle`
+/// is exactly this shape —
+///
+/// ```text
+/// impl OffThread for GioBlocking {
+///     fn spawn_blocking(&self, work: OffThreadWork) -> LocalBoxFuture<'static, Option<OffThreadValue>> {
+///         Box::pin(async move { gio::spawn_blocking(work).await.ok() })
+///     }
+/// }
+/// ```
+///
+/// Tests: `testing::FakeOffThread` (held until the test runs it, or inline);
+/// [`ThreadOffThread`](crate::exec::ThreadOffThread) is a std-only implementation on real threads.
+pub trait OffThread {
+    /// Runs `work` away from the UI thread. Resolves with its result, or `None` when the work did
+    /// not finish — it panicked, or the pool dropped it.
+    fn spawn_blocking(&self, work: OffThreadWork) -> LocalBoxFuture<'static, Option<OffThreadValue>>;
+}
+
+impl dyn OffThread {
+    /// [`OffThread::spawn_blocking`] for work with any `Send` result: `None` when the work did not
+    /// finish.
+    pub fn run<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> LocalBoxFuture<'static, Option<T>> {
+        let pending = self.spawn_blocking(Box::new(move || Box::new(work()) as OffThreadValue));
+        Box::pin(async move { pending.await.and_then(|value| value.downcast::<T>().ok()).map(|value| *value) })
+    }
 }
 
 /// The live preview as the coordinator sees it: the HTML the asset scheme serves as

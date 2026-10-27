@@ -277,7 +277,8 @@ fn the_dispatcher_publishes_the_windows_snapshot_for_the_menu_builder() {
 #[test]
 fn every_root_accelerator_can_be_wired_and_invoked() {
     // What the shell does with the window's accelerators, once: nothing in the table is missing a
-    // handler slot, and no chord is registered for a command the focused widget owns.
+    // handler slot. LINUX: the editing rows are registered too (their handlers act on the focused
+    // widget), and Escape is the window's key controller's, not an accelerator (§2.2).
     let f = Fixture::new();
     f.set(ShellSnapshot {
         has_document: true,
@@ -290,8 +291,6 @@ fn every_root_accelerator_can_be_wired_and_invoked() {
         has_selection: true,
         has_find_query: true,
         is_book_window: false,
-        // The find bar open rather than Zen: Esc lives either way, and Find… is dead in Zen, where
-        // the window shows no chrome to put the bar in.
         find_bar_open: true,
         ..ShellSnapshot::empty()
     });
@@ -306,8 +305,17 @@ fn every_root_accelerator_can_be_wired_and_invoked() {
         dispatcher.try_invoke(spec.id, NONE);
     }
 
-    assert!(command_table::root_accelerators().iter().all(|s| s.root_accelerator));
+    assert!(command_table::root_accelerators().iter().all(|s| !s.accelerators().is_empty()));
     assert!(seen.borrow().contains(&CommandId::Find));
-    assert!(seen.borrow().contains(&CommandId::Escape));
-    assert!(!seen.borrow().contains(&CommandId::Copy));
+    assert!(seen.borrow().contains(&CommandId::Copy));
+    assert!(!seen.borrow().contains(&CommandId::Escape));
+
+    // Escape, from the window's own controller, through the same dispatcher.
+    let escaped = Rc::new(RefCell::new(0));
+    {
+        let escaped = escaped.clone();
+        dispatcher.register(CommandId::Escape, move || *escaped.borrow_mut() += 1);
+    }
+    assert!(dispatcher.try_invoke(CommandId::Escape, NONE));
+    assert_eq!(*escaped.borrow(), 1);
 }

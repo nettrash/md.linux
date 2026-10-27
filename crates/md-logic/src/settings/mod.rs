@@ -9,11 +9,13 @@
 //! | [`palette`] | `Palette.cs` |
 //! | [`typing_settings`] | `TypingSettings.cs` |
 //! | [`wrap_selection_setting`] | `WrapSelectionSetting.cs` |
+//! | [`recent_cleared_at`] | — (Linux: Open Recent ▸ Clear Menu over the desktop's shared list) |
 //!
 //! The types are re-exported here: `settings::SettingsStore`, `settings::Palette`, ….
 
 pub mod in_memory_settings_store;
 pub mod palette;
+pub mod recent_cleared_at;
 pub mod settings_keys;
 pub mod settings_store;
 pub mod typing_settings;

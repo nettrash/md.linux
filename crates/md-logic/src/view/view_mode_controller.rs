@@ -156,6 +156,21 @@ impl ViewModeController {
         }
     }
 
+    /// Edit ▸ Find… and Find and Replace… in a window that shows no editor — the Mac's
+    /// `showEditor` (shell-design §2.5): a match lives in the source, exactly as a note does, so the
+    /// editor comes back as the Notes jump's transient nudge, Preview → Edit, never stored and
+    /// never remembered for the file. In Zen the equivalent is Zen's own write/read switch, so
+    /// reading turns to writing. With the editor already on screen nothing changes.
+    pub fn show_editor(&self) {
+        if self.state.zen_active() {
+            self.state.set_zen_reading(false);
+            return;
+        }
+        if let Some(nudge) = view_mode_rule::navigation_nudge(self.state.effective_mode(), ViewMode::Edit) {
+            self.state.set_navigation_mode(Some(nudge));
+        }
+    }
+
     /// Notes: a note never renders, so the editor must be visible — nudge Preview → Edit (never
     /// from Split or Edit). The nudge is assigned only when there is one: writing `None` back would
     /// cancel the nudge a previous note jump set.

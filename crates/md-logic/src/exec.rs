@@ -5,17 +5,21 @@
 //! (`glib::MainContext::spawn_local`) and the tests on [`LocalExecutor`], which runs spawned
 //! futures until none can make progress — the test then answers a fake (a dialog, a timer) and
 //! pumps again. Nothing here is `Send`: like WinUI's dispatcher and GTK's main loop, everything
-//! runs on the one UI thread.
+//! runs on the one UI thread — except the work handed to an [`OffThread`], which crosses to
+//! another thread and back as plain `Send` data ([`ThreadOffThread`] is the std-only runner).
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
+use std::panic::{self, AssertUnwindSafe};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
+
+use crate::seams::{OffThread, OffThreadValue, OffThreadWork};
 
 /// A boxed, non-`Send` future — the return type of every asynchronous seam.
 pub type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -201,6 +205,52 @@ impl<T: 'static> Completion<T> {
 /// A future that is already finished — what a fake returns for an immediate answer.
 pub fn ready<T: 'static>(value: T) -> LocalBoxFuture<'static, T> {
     Box::pin(std::future::ready(value))
+}
+
+/// [`OffThread`] on `std::thread`: one short-lived thread per piece of work, the result handed
+/// back through the future and the waker. Std only, so md-logic's own tests can show that what
+/// crosses the seam really runs elsewhere; the GTK app uses GLib's pool (`gio::spawn_blocking`)
+/// instead. Work that panics resolves to `None`, as a failed `JoinHandle` does; so does work no
+/// thread could be started for.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ThreadOffThread;
+
+#[derive(Default)]
+struct ThreadSlot {
+    /// `Some` once the thread is done: the work's value, or `None` if it panicked.
+    finished: Option<Option<OffThreadValue>>,
+    waker: Option<Waker>,
+}
+
+impl OffThread for ThreadOffThread {
+    fn spawn_blocking(&self, work: OffThreadWork) -> LocalBoxFuture<'static, Option<OffThreadValue>> {
+        let slot = Arc::new(Mutex::new(ThreadSlot::default()));
+        let filled = slot.clone();
+        let spawned = std::thread::Builder::new().name("md-off-thread".to_string()).spawn(move || {
+            let value = panic::catch_unwind(AssertUnwindSafe(work)).ok();
+            let waker = {
+                let mut slot = filled.lock().unwrap_or_else(PoisonError::into_inner);
+                slot.finished = Some(value);
+                slot.waker.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        });
+        if spawned.is_err() {
+            return ready(None);
+        }
+        Box::pin(std::future::poll_fn(move |cx| {
+            let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+            match slot.finished.take() {
+                Some(value) => Poll::Ready(value),
+                None => {
+                    slot.waker = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }))
+    }
 }
 
 #[cfg(test)]

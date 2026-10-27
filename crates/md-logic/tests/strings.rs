@@ -2,7 +2,7 @@
 //! no test file of its own for `Strings`; the suites that use a string pin it in context. These
 //! pin the functions' output against md.win's C# by hand.)
 
-use md_logic::strings::{self, books, buttons, documents, exports, find, help};
+use md_logic::strings::{self, books, buttons, documents, exports, find, help, preview};
 
 #[test]
 fn the_escapes_are_the_typographic_characters() {
@@ -93,4 +93,26 @@ fn help_points_at_the_linux_pages() {
     assert_eq!(help::SUPPORT_URL, "https://nettrash.me/linux/md/support.html");
     assert_eq!(help::PRIVACY_URL, "https://nettrash.me/linux/md/privacy.html");
     assert_eq!(help::ENGINES.len(), 5);
+}
+
+// ── LINUX: the strings the shell would otherwise spell (shell-design §11, §15) ────────────
+
+#[test]
+fn the_preview_give_up_line_is_the_macs_word_for_word() {
+    // md.macOS PreviewRetryPolicy.noticeSource; U+2014, one emphasised line of Markdown.
+    assert_eq!(
+        preview::STOPPED_NOTICE_SOURCE,
+        "*The preview stopped unexpectedly. Your document is unchanged \u{2014} the next edit will try again.*"
+    );
+    assert!(!preview::STOPPED_NOTICE_SOURCE.contains('\n'));
+    // Rendered through the ordinary document pipeline, it is one paragraph of emphasis.
+    let html = md_core::markdown::html::document(preview::STOPPED_NOTICE_SOURCE, "notes", false, false);
+    assert!(html.contains(
+        "<p><em>The preview stopped unexpectedly. Your document is unchanged \u{2014} the next edit will try again.</em></p>"
+    ));
+}
+
+#[test]
+fn the_open_dialogs_filter_is_named() {
+    assert_eq!(documents::OPEN_FILTER, "Supported Documents");
 }

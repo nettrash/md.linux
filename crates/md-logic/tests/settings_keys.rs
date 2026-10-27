@@ -1,6 +1,7 @@
 //! Port of md.win `tests/Md.App.Logic.Tests/SettingsKeysTests.cs`: `SettingsKeysTests` (§9's
-//! eleven keys, their defaults and the other names md stores state under) and
-//! `InMemorySettingsStoreTests` (the store semantics the app's store must mirror).
+//! keys — md.win's eleven in Linux spelling plus `md.linux.recentClearedAt` — their defaults and
+//! the other names md stores state under) and `InMemorySettingsStoreTests` (the store semantics
+//! the app's store must mirror). LINUX: the tests of `settings::recent_cleared_at` at the end.
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -8,13 +9,15 @@ use std::rc::Rc;
 
 use md_core::text::unicode;
 use md_logic::settings::settings_keys::{self, ALL};
-use md_logic::settings::{InMemorySettingsStore, SettingsStore};
+use md_logic::settings::{InMemorySettingsStore, SettingsStore, recent_cleared_at};
 
 /// The module's own source: the constants and the §9 table in its doc comment.
 const SOURCE: &str = include_str!("../src/settings/settings_keys.rs");
 
 #[test]
-fn the_eleven_keys_are_pinned_in_section_9_order() {
+fn the_twelve_keys_are_pinned_in_section_9_order() {
+    // md.win: The_eleven_keys_are_pinned_in_section_9_order; Linux adds md.linux.recentClearedAt
+    // last (shell-design §9.1).
     assert_eq!(
         ALL,
         [
@@ -29,6 +32,7 @@ fn the_eleven_keys_are_pinned_in_section_9_order() {
             "md.continueLists",
             "md.capitalizeSentences",
             "md.wrapSelection",
+            "md.linux.recentClearedAt",
         ]
     );
 }
@@ -48,6 +52,8 @@ fn each_constant_spells_its_key() {
     assert_eq!(settings_keys::CONTINUE_LISTS, "md.continueLists");
     assert_eq!(settings_keys::CAPITALIZE_SENTENCES, "md.capitalizeSentences");
     assert_eq!(settings_keys::WRAP_SELECTION, "md.wrapSelection");
+    // shell-design §6.6: Clear Menu over the desktop's shared recent list.
+    assert_eq!(settings_keys::RECENT_CLEARED_AT, "md.linux.recentClearedAt");
 }
 
 #[test]
@@ -63,10 +69,14 @@ fn keys_are_distinct_namespaced_and_free_of_whitespace() {
 }
 
 #[test]
-fn only_the_two_window_sizes_are_linux_only() {
-    // md.win: Only_the_two_window_sizes_are_Windows_only.
+fn only_the_two_window_sizes_and_the_recent_clear_are_linux_only() {
+    // md.win: Only_the_two_window_sizes_are_Windows_only. Linux's Open Recent is the desktop's
+    // shared list, so its Clear Menu mark is Linux's own key too.
     let linux: Vec<&str> = ALL.iter().copied().filter(|k| k.starts_with("md.linux.")).collect();
-    assert_eq!(linux, [settings_keys::DOCUMENT_WINDOW_SIZE, settings_keys::BOOK_WINDOW_SIZE]);
+    assert_eq!(
+        linux,
+        [settings_keys::DOCUMENT_WINDOW_SIZE, settings_keys::BOOK_WINDOW_SIZE, settings_keys::RECENT_CLEARED_AT]
+    );
     assert!(ALL.iter().all(|k| !k.starts_with("md.win.")), "a Windows-only key leaked into the Linux list");
 }
 
@@ -234,4 +244,58 @@ fn keys_keep_the_order_they_were_first_stored_in() {
     s.remove("a");
     s.set_bool("c", true);
     assert_eq!(s.keys(), ["b", "c"]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// LINUX: md.linux.recentClearedAt — Open Recent ▸ Clear Menu over the desktop's shared list
+// (shell-design §6.6).
+
+#[test]
+fn a_menu_never_cleared_lists_every_entry_md_registered() {
+    let s = InMemorySettingsStore::new();
+    assert_eq!(recent_cleared_at::read(&s), None);
+    assert!(recent_cleared_at::is_listed(0, None));
+    assert!(recent_cleared_at::is_listed(1_800_000_000, None));
+}
+
+#[test]
+fn clear_menu_stores_the_moment_as_decimal_seconds_and_hides_what_came_before() {
+    let s = InMemorySettingsStore::new();
+    recent_cleared_at::clear(&s, 1_800_000_000);
+    assert_eq!(s.get_string(settings_keys::RECENT_CLEARED_AT).as_deref(), Some("1800000000"));
+    let cleared = recent_cleared_at::read(&s);
+    assert_eq!(cleared, Some(1_800_000_000));
+
+    assert!(!recent_cleared_at::is_listed(1_799_999_999, cleared));
+    // Registered in the same second as the clear: older than "after it", so hidden.
+    assert!(!recent_cleared_at::is_listed(1_800_000_000, cleared));
+    assert!(recent_cleared_at::is_listed(1_800_000_001, cleared));
+}
+
+#[test]
+fn a_second_clear_moves_the_mark_and_announces_the_key() {
+    let s = InMemorySettingsStore::new();
+    let changes = Rc::new(RefCell::new(Vec::<String>::new()));
+    {
+        let changes = changes.clone();
+        s.changed().connect(move |key| changes.borrow_mut().push(key.to_string()));
+    }
+    recent_cleared_at::clear(&s, 100);
+    recent_cleared_at::clear(&s, 200);
+    assert_eq!(recent_cleared_at::read(&s), Some(200));
+    assert_eq!(*changes.borrow(), [settings_keys::RECENT_CLEARED_AT, settings_keys::RECENT_CLEARED_AT]);
+    assert!(changes.borrow().iter().all(|key| recent_cleared_at::is_key(key)));
+    assert!(!recent_cleared_at::is_key(settings_keys::PDF_PAGE_SIZE));
+}
+
+#[test]
+fn a_value_that_is_not_a_whole_number_reads_as_never_cleared() {
+    let s = InMemorySettingsStore::new();
+    for garbage in ["", "soon", "1.5", " 12", "12 ", "99999999999999999999"] {
+        s.set_string(settings_keys::RECENT_CLEARED_AT, garbage);
+        assert_eq!(recent_cleared_at::read(&s), None, "{garbage:?}");
+    }
+    // A bool under the key is "absent" to a string read (the store's own rule).
+    s.set_bool(settings_keys::RECENT_CLEARED_AT, true);
+    assert_eq!(recent_cleared_at::read(&s), None);
 }

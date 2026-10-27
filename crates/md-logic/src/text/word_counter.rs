@@ -10,7 +10,7 @@
 //! syllable counts as one word each ("北京大学" is 4 here, 2 on macOS), and an unspaced Thai run is
 //! one word; md-core documents the gap.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use md_core::book::writing_stats;
 
@@ -28,7 +28,8 @@ impl WordCounter for WritingStatsWordCounter {
 }
 
 /// The counter the app runs — one place, so the footer, the book footer and a self-test cannot end
-/// up on different rules (md.win's `WordCounters.Create`). Never fails.
-pub fn create() -> Rc<dyn WordCounter> {
-    Rc::new(WritingStatsWordCounter)
+/// up on different rules (md.win's `WordCounters.Create`). Never fails. An `Arc`, because the
+/// derived text takes it off the UI thread ([`OffThread`](crate::seams::OffThread)).
+pub fn create() -> Arc<dyn WordCounter> {
+    Arc::new(WritingStatsWordCounter)
 }

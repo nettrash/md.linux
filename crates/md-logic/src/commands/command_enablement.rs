@@ -13,7 +13,7 @@
 use md_core::document::view_mode::ViewMode;
 
 use super::command_dispatcher::CommandArgument;
-use super::command_id::CommandId;
+use super::command_id::{ActionScope, CommandId};
 use super::command_table::{self, MenuPath};
 use super::shell_snapshot::ShellSnapshot;
 
@@ -28,22 +28,15 @@ fn saved(s: &ShellSnapshot) -> bool {
     has_active_document(s) && s.is_saved
 }
 
-/// Whether this window has a find bar at all. §8.1 lists the Book window's rows — the menu bar,
-/// the split view, the footer and the info bar — and there is no find bar among them: Find is a
-/// port's addition to the document window (§3.5), because the Mac gets Find from `NSTextView` and
-/// its book pane publishes no find of its own.
-///
-/// So the whole find family is dead in the Book window, not merely unhandled there. Reading it off
-/// `has_find_query` / `find_bar_open` alone would have made Find Next and Esc right by accident — a
-/// Book window can never set either — while leaving Find…, Replace… and Use Selection for Find
-/// enabled on `editor_visible` and `has_selection`, which an article does set.
-fn has_find_bar(s: &ShellSnapshot) -> bool {
-    !s.is_book_window
-}
-
 /// Whether the row for `id` is live in this window right now. Exhaustive: a new [`CommandId`]
 /// without a rule does not compile.
+///
+/// LINUX: while an alert is up in the window ([`ShellSnapshot::dialog_open`]) every
+/// [`ActionScope::Window`] command is off, whatever its own rule says (shell-design §2.2).
 pub fn is_enabled(id: CommandId, s: &ShellSnapshot) -> bool {
+    if s.dialog_open && id.scope() == ActionScope::Window {
+        return false;
+    }
     use CommandId as C;
     match id {
         // File (§2.2)
@@ -77,18 +70,17 @@ pub fn is_enabled(id: CommandId, s: &ShellSnapshot) -> bool {
         // a row that lights up and does nothing (the Mac greys all three the same way).
         C::Cut | C::Copy | C::Delete => s.editor_visible && s.has_selection,
         C::Paste | C::SelectAll => s.editor_visible,
-        // The find family, all five gated on the window HAVING a find bar (§8.1) as well as on
-        // §2.4's own condition — and every one of them on an editor ON SCREEN, because each either
-        // selects its hit in the editor or opens the bar the layout rule hides with it: lit with
-        // the editor collapsed (Preview, Zen's reading half) they did nothing visible, which is the
-        // macOS Preview-only Find bug. The three that open the bar are dead in Zen too, where the
-        // window refuses to show any chrome (§5.4); Ctrl+G still walks the text there.
-        C::Find => has_find_bar(s) && s.editor_visible && !s.zen_active,
-        C::FindNext | C::FindPrevious => has_find_bar(s) && s.editor_visible && s.has_find_query,
-        // Replace opens the same bar as Find… and edits through the same editor pane, so it asks
-        // for exactly what Find… asks for.
-        C::Replace => has_find_bar(s) && s.editor_visible && !s.zen_active,
-        C::UseSelectionForFind => has_find_bar(s) && s.editor_visible && !s.zen_active && s.has_selection,
+        // LINUX DECISION — the Mac's find, not md.win's (shell-design §2.5, §3.6, §14). md.win's
+        // Book window has no find bar and its rows open the bar only over an editor on screen; on
+        // the Mac (1.5) the find bar belongs to the editor of the document window AND of the book
+        // workspace, and Find… in a window showing only the preview (Preview, Zen reading) first
+        // nudges the editor back — the Notes jump's transient nudge, never a stored mode
+        // (`ViewModeController::show_editor`). So Find… and Find and Replace… are live on any
+        // editing surface, the Book window's article included; the rows that act on a hit or on
+        // the editor's selection still need that editor on screen, where the hit is selected.
+        C::Find | C::Replace => has_active_document(s),
+        C::FindNext | C::FindPrevious => s.editor_visible && s.has_find_query,
+        C::UseSelectionForFind => s.editor_visible && s.has_selection,
         // The typing toggles are settings, live in every window like the PDF page size: a writer
         // may turn them off from the Book window or with no editor on screen.
         C::ContinueLists | C::CapitalizeSentences | C::WrapSelection => true,

@@ -13,7 +13,9 @@ use md_logic::commands::command_enablement::{
     has_active_document, is_checked, is_enabled, is_row_checked, is_submenu_enabled,
 };
 use md_logic::commands::command_table;
-use md_logic::commands::{CommandArgument, CommandId, DiagramRef, MenuPath, RecentEntry, ShellSnapshot, WindowTitle};
+use md_logic::commands::{
+    ActionScope, CommandArgument, CommandId, DiagramRef, MenuPath, RecentEntry, ShellSnapshot, WindowTitle,
+};
 use md_logic::seams::WindowId;
 
 fn none() -> ShellSnapshot {
@@ -173,9 +175,25 @@ fn the_window_list_needs_a_window() {
 
 #[test]
 fn needs_the_editor_pane_on_screen() {
-    for id in [CommandId::Paste, CommandId::SelectAll, CommandId::Find, CommandId::Replace] {
+    // LINUX: md.win's list less Find… and Replace…, which nudge the editor back instead (below).
+    for id in [CommandId::Paste, CommandId::SelectAll] {
         assert!(!is_enabled(id, &document()), "{id:?}");
         assert!(is_enabled(id, &ShellSnapshot { editor_visible: true, ..document() }), "{id:?}");
+    }
+}
+
+/// LINUX DECISION (shell-design §2.5, the Mac's 1.5 `showEditor`): Find… and Find and Replace…
+/// need an editing surface, not an editor on screen — in Preview or Zen's reading half they first
+/// nudge the editor back. With no document there is nothing to find in.
+#[test]
+fn find_and_replace_need_an_editing_surface_and_nudge_the_editor_back() {
+    for id in [CommandId::Find, CommandId::Replace] {
+        assert!(!is_enabled(id, &none()), "{id:?}");
+        assert!(!is_enabled(id, &book_window_idle()), "{id:?}");
+        assert!(is_enabled(id, &document()), "{id:?}"); // Preview: the editor is off screen
+        assert!(is_enabled(id, &ShellSnapshot { editor_visible: true, ..document() }), "{id:?}");
+        assert!(is_enabled(id, &ShellSnapshot { zen_active: true, zen_reading: true, ..document() }), "{id:?}");
+        assert!(is_enabled(id, &book_window_editing()), "{id:?}");
     }
 }
 
@@ -236,23 +254,23 @@ fn use_selection_for_find_needs_a_selection_in_an_editor_on_screen() {
     assert!(is_enabled(id, &ShellSnapshot { editor_visible: true, has_selection: true, ..document() }));
 }
 
-/// Zen has no chrome and the find bar is one of the rows it collapses (§5.4), so the window's
-/// three handlers that would open the bar refuse there. Enabled, their chords were swallowed as
-/// handled and did nothing; disabled, Ctrl+F / Ctrl+H / Ctrl+E fall through to the focused widget
-/// like any other disabled chord.
+/// md.win: The_rows_that_open_the_find_bar_are_dead_in_zen — WinUI's Zen had no room for the bar.
+/// LINUX DECISION (§3.6): the bar sits at the top of the editor column and goes wherever the
+/// editor goes, Zen's writing half included, as the Mac's NSTextView find bar does.
 #[test]
-fn the_rows_that_open_the_find_bar_are_dead_in_zen() {
+fn the_rows_that_open_the_find_bar_live_in_zen_too() {
     let writing = ShellSnapshot { editor_visible: true, has_selection: true, has_find_query: true, ..document() };
     for id in [CommandId::Find, CommandId::Replace, CommandId::UseSelectionForFind] {
         assert!(is_enabled(id, &writing));
-        assert!(!is_enabled(id, &ShellSnapshot { zen_active: true, ..writing.clone() }));
+        assert!(is_enabled(id, &ShellSnapshot { zen_active: true, ..writing.clone() }));
     }
 }
 
-/// §8.1 gives the Book window a menu bar, a split view, a footer and an info bar — and no find
-/// bar. So the whole of §2.4's find family is dead there, however live the article itself is.
+/// md.win: The_find_family_is_never_live_in_the_book_window — its Book window had no find bar.
+/// LINUX DECISION (§3.6, §14): the bar belongs to the article panes, so the Book window has it,
+/// as the Mac's book workspace does; every find row follows the same rule in both windows.
 #[test]
-fn the_find_family_is_never_live_in_the_book_window() {
+fn the_find_family_is_live_in_the_book_window_as_in_a_document_window() {
     for id in [
         CommandId::Find,
         CommandId::FindNext,
@@ -268,7 +286,7 @@ fn the_find_family_is_never_live_in_the_book_window() {
 
         let book_window =
             ShellSnapshot { editor_visible: true, has_selection: true, has_find_query: true, ..book_window_editing() };
-        assert!(!is_enabled(id, &book_window));
+        assert!(is_enabled(id, &book_window));
 
         // The Edit rows that DO have a handler there are unaffected — this is about the find bar,
         // not about the Book window's editor.
@@ -331,6 +349,66 @@ fn escape_belongs_to_the_editor_unless_zen_or_the_find_bar_wants_it() {
     assert!(!is_enabled(CommandId::Escape, &ShellSnapshot { editor_visible: true, ..document() }));
     assert!(is_enabled(CommandId::Escape, &ShellSnapshot { zen_active: true, ..document() }));
     assert!(is_enabled(CommandId::Escape, &ShellSnapshot { find_bar_open: true, ..document() }));
+    // LINUX: the Book window's find bar too (§3.6).
+    assert!(is_enabled(CommandId::Escape, &ShellSnapshot { find_bar_open: true, ..book_window_editing() }));
+}
+
+// ── LINUX: an alert up in the window (§2.2) ───────────────────────────────────────────────
+
+/// Everything §2's tables can ask for, at once, in a document window.
+fn everything() -> ShellSnapshot {
+    ShellSnapshot {
+        is_saved: true,
+        is_dirty: true,
+        has_book: true,
+        outline: one_heading(),
+        notes: one_note(),
+        diagrams: one_diagram(),
+        editor_visible: true,
+        can_undo: true,
+        can_redo: true,
+        recent_entries: one_recent(),
+        window_titles: vec![WindowTitle::new(WindowId(1), "notes.md", true)],
+        has_selection: true,
+        has_find_query: true,
+        find_bar_open: true,
+        ..document()
+    }
+}
+
+#[test]
+fn an_open_dialog_disables_every_window_command_and_leaves_the_applications_alone() {
+    // adw::AlertDialog is presented inside the window, so its shortcuts would still reach the
+    // window behind it; the Mac's sheet blocks the window's menu items the same way.
+    let blocked = ShellSnapshot { dialog_open: true, ..everything() };
+    for id in CommandId::ALL {
+        match id.scope() {
+            ActionScope::Window => assert!(!is_enabled(id, &blocked), "{id:?} is live behind a dialog"),
+            ActionScope::App => assert_eq!(is_enabled(id, &blocked), is_enabled(id, &everything()), "{id:?}"),
+        }
+    }
+    // The same snapshot without the dialog lights the window's rows.
+    for id in [CommandId::Save, CommandId::Copy, CommandId::Find, CommandId::Bold, CommandId::Escape] {
+        assert!(is_enabled(id, &everything()), "{id:?}");
+    }
+    // Ctrl+N and Ctrl+Q still work, and so do the settings toggles.
+    for id in [CommandId::New, CommandId::Quit, CommandId::ContinueLists, CommandId::ShowBook] {
+        assert!(is_enabled(id, &blocked), "{id:?}");
+    }
+}
+
+#[test]
+fn an_open_dialog_greys_the_windows_submenus_but_not_the_ticks() {
+    let blocked = ShellSnapshot { dialog_open: true, zen_active: true, ..everything() };
+    assert!(!is_submenu_enabled(&MenuPath::submenu("Edit", "Find"), &blocked));
+    assert!(!is_submenu_enabled(&MenuPath::submenu("Format", "Heading"), &blocked));
+    assert!(!is_submenu_enabled(&MenuPath::nested("File", "Export", "Diagram as SVG"), &blocked));
+    // Export ▸ itself stays live: the PDF Page Size picker inside it is the application's setting.
+    assert!(is_submenu_enabled(&MenuPath::submenu("File", "Export"), &blocked));
+    // Open Recent's rows are the application's.
+    assert!(is_submenu_enabled(&MenuPath::submenu("File", "Open Recent"), &blocked));
+    // A tick is state, not a command: it stays what it is while the row is greyed.
+    assert!(is_checked(CommandId::ZenMode, &blocked));
 }
 
 // ── Submenus (§2.2, §2.6) ─────────────────────────────────────────────────────────────────
