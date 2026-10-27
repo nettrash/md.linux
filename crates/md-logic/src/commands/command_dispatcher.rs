@@ -91,6 +91,13 @@ impl CommandDispatcher {
         self.handlers.borrow_mut().insert(id, Rc::new(handler));
     }
 
+    /// (Linux) Whether a handler is registered for `id`, enabled or not — the integration gate's
+    /// question of a window (docs/shell-work-packages.md §6: every command the window can enable
+    /// has a handler there; md.win pinned it by reading its windows' source).
+    pub fn is_wired(&self, id: CommandId) -> bool {
+        self.handlers.borrow().contains_key(&id)
+    }
+
     /// True when the command is both wired and enabled — what a menu row's sensitivity reads.
     pub fn can_invoke(&self, id: CommandId) -> bool {
         self.handlers.borrow().contains_key(&id) && command_enablement::is_enabled(id, &self.snapshot())

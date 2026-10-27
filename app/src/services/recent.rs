@@ -22,7 +22,6 @@
 //!   stamp is strictly later, `recent_cleared_at::is_listed`): md's menu empties while every other
 //!   application keeps its history. A file md registers within the same second as the clear stays
 //!   hidden until it is opened again — the price of a whole-second cutoff.
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use std::rc::Rc;
 
@@ -32,6 +31,8 @@ use md_logic::documents::file_names;
 use md_logic::event::Event;
 use md_logic::settings::SettingsStore;
 use md_logic::settings::recent_cleared_at;
+
+use crate::services::paths::tilde_folder;
 
 /// The application name md registers items under, and the command line Files would reopen them
 /// with (§6.6).
@@ -178,7 +179,7 @@ fn entries(records: Vec<RecentRecord>, cleared_at: Option<i64>, home: &str) -> V
     kept.iter()
         .map(|(_, uri, path)| {
             let name = file_names::name_of(path);
-            let folder = tilde(file_names::directory_of(path), home);
+            let folder = tilde_folder(file_names::directory_of(path), home);
             let title = if names.iter().filter(|n| **n == name).count() > 1 {
                 format!("{name}{NAME_FOLDER_SEPARATOR}{folder}")
             } else {
@@ -187,21 +188,6 @@ fn entries(records: Vec<RecentRecord>, cleared_at: Option<i64>, home: &str) -> V
             RecentEntry::new(uri.clone(), title, folder)
         })
         .collect()
-}
-
-/// `folder` with the home folder written `~` (the header bar's spelling, §1.4).
-fn tilde(folder: &str, home: &str) -> String {
-    let home = home.trim_end_matches('/');
-    if home.is_empty() {
-        return folder.to_string();
-    }
-    if folder == home {
-        return "~".to_string();
-    }
-    match folder.strip_prefix(home) {
-        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
-        _ => folder.to_string(),
-    }
 }
 
 #[cfg(test)]
@@ -289,15 +275,5 @@ mod tests {
         let records = vec![record("/home/me/a.md", Some(5), true), record("/home/me/a.md", Some(7), true)];
         let listed = entries(records, None, HOME);
         assert_eq!(names(&listed), ["a.md"]);
-    }
-
-    #[test]
-    fn folders_are_written_from_home() {
-        assert_eq!(tilde("/home/me", HOME), "~");
-        assert_eq!(tilde("/home/me/Documents/Книги", HOME), "~/Documents/Книги");
-        assert_eq!(tilde("/home/meadow", HOME), "/home/meadow");
-        assert_eq!(tilde("/srv", HOME), "/srv");
-        assert_eq!(tilde("/home/me/x", "/home/me/"), "~/x");
-        assert_eq!(tilde("/x", ""), "/x");
     }
 }

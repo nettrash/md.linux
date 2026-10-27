@@ -6,9 +6,6 @@
 //! its name is translated, so it is looked up in GTK's `gtk40` gettext domain; leaving the printer
 //! unset would send the page to the default (CUPS) printer instead. A4 comes out 595 × 842 pt, the
 //! body's 56 px padding plus the 0.5 in margins put the first glyph at 36 + 42 pt, backgrounds print.
-// P4 → P1 / P5: until the windows construct exports, only the self-test reaches this; removed at the
-// integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::Cell;
 use std::path::Path;

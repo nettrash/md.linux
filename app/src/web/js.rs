@@ -5,9 +5,6 @@
 //! The spike's `util.rs` JSON helpers, kept (docs/linux-facts.md §4): `evaluate_javascript_future`
 //! hands back a `javascriptcore::Value` and `to_json(0)` serialises it — `"1"` with its quotes for a
 //! string, `null` as four letters — which is exactly the text md-logic's `json_script` decodes.
-// P4 → P1 / P5: until the windows construct previews and exports, only the self-test reaches this;
-// removed at the integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use md_logic::preview::scripts::invariant_number;
 use webkit::prelude::*;

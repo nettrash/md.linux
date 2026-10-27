@@ -16,7 +16,8 @@
 //! applied on a `Priority::HIGH` idle — after GtkTextHistory has closed the keystroke's own group
 //! and before the next input event — as its own user action under `TypingHooks::applying` /
 //! `external_edit`, so it is its own undo step (asserted by the self-test, §16.3). GTK's typing
-//! over a selection arrives as two user actions; [`super::typing::UserActionTracker`] joins them.
+//! over a selection arrives as two user actions; the pane bridges them into one — one undo step,
+//! as on the Mac — and [`super::typing::UserActionTracker`] judges them as one replacement.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -70,7 +71,12 @@ pub struct EditorPane {
     in_end: Cell<bool>,
     /// Up while the `\r` filter re-inserts normalised text.
     normalizing: Cell<bool>,
-    flush_pending: Cell<bool>,
+    /// The pane's own outermost user action is open around GTK's typing over a selection (see
+    /// [`EditorPane::bridge`]); it ends on the next high-priority idle.
+    bridging: Cell<bool>,
+    /// Counts the external texts applied: a `set_text` deferred out of `end-user-action` is
+    /// dropped when a newer one landed first (an echo of the old text must not overwrite it).
+    text_serial: Cell<u64>,
     paste_settle: RefCell<Option<TimerHandle>>,
     last_selection: Cell<(i32, i32)>,
     /// When the selection last became empty — the moment the buffer released PRIMARY.
@@ -143,7 +149,8 @@ impl EditorPane {
             history_before: RefCell::new(None),
             in_end: Cell::new(false),
             normalizing: Cell::new(false),
-            flush_pending: Cell::new(false),
+            bridging: Cell::new(false),
+            text_serial: Cell::new(0),
             paste_settle: RefCell::new(None),
             last_selection: Cell::new((0, 0)),
             released_at: Cell::new(None),
@@ -166,16 +173,19 @@ impl EditorPane {
     }
 
     /// The `GtkTextView` itself — for focus checks, and for the self-test.
+    #[cfg(feature = "selftest")]
     pub fn text_view(&self) -> gtk::TextView {
         self.view.clone()
     }
 
     /// The placeholder label (visible only while the buffer is empty).
+    #[cfg(feature = "selftest")]
     pub fn placeholder(&self) -> gtk::Label {
         self.placeholder.clone()
     }
 
     /// The typing hooks, for the self-test's report (`TypingHooks::trace`).
+    #[cfg(feature = "selftest")]
     pub fn typing_hooks(&self) -> &TypingHooks {
         &self.hooks
     }
@@ -190,20 +200,26 @@ impl EditorPane {
     pub fn set_text(&self, text: &str) {
         if self.in_end.get() {
             // GtkTextHistory's group is still open; an irreversible action now would be refused.
+            // A newer text applied before the idle wins.
             let me = self.me.clone();
             let text = text.to_string();
+            let serial = self.text_serial.get();
             glib::idle_add_local_full(glib::Priority::HIGH, move || {
-                if let Some(pane) = me.upgrade() {
+                if let Some(pane) = me.upgrade()
+                    && pane.text_serial.get() == serial
+                {
                     pane.set_text(&text);
                 }
                 glib::ControlFlow::Break
             });
             return;
         }
+        // An open bridge closes first: its replacement is judged against the text it was typed in.
         self.flush_held();
         if !self.hooks.external_text(&self.text(), text) {
             return;
         }
+        self.text_serial.set(self.text_serial.get() + 1);
         let (start, length) = self.selection_utf16();
         self.buffer.begin_irreversible_action();
         self.hooks.replacing(|| self.buffer.set_text(editor_text::to_editor(text)));
@@ -403,6 +419,7 @@ impl EditorPane {
     }
 
     /// Args: the scroll fraction (shell-design §3.5).
+    #[cfg(feature = "selftest")]
     pub fn scrolled(&self) -> &Event<f64> {
         &self.scrolled_event
     }
@@ -527,7 +544,7 @@ impl EditorPane {
         match ended {
             Ended::Nothing => {}
             Ended::OwnEdit => self.report(&text),
-            Ended::Held => self.schedule_flush(),
+            Ended::Held => self.bridge(),
             Ended::Judge { before, direction } => self.judge(&before, direction, text),
         }
         self.in_end.set(false);
@@ -589,25 +606,33 @@ impl EditorPane {
         });
     }
 
-    fn schedule_flush(&self) {
-        if self.flush_pending.replace(true) {
+    /// GTK has deleted the selection a typed character replaces and is about to insert it in a user
+    /// action of its own (`gtk_text_view_commit_text`). Still inside `end-user-action`, before
+    /// GtkTextHistory closes the deletion's group, an outermost user action of the pane's begins:
+    /// the tracker adopts the held snapshot, the history's group stays open (its nesting count
+    /// never reached zero), and GTK's insertion lands in it as an inner action. The next
+    /// high-priority idle — before any further input — ends it: the replacement is one undo step,
+    /// as on the Mac and md.win, and the hooks judge it as one change. A deletion nothing follows
+    /// (Delete, Cut over a selection) closes the same way, alone.
+    fn bridge(&self) {
+        if self.bridging.replace(true) {
             return;
         }
+        self.buffer.begin_user_action();
         let me = self.me.clone();
         glib::idle_add_local_full(glib::Priority::HIGH, move || {
             if let Some(pane) = me.upgrade() {
-                pane.flush_pending.set(false);
                 pane.flush_held();
             }
             glib::ControlFlow::Break
         });
     }
 
-    /// A held selection deletion that no insertion completed is judged on its own.
+    /// Ends an open bridge (its idle, or anything that must not run inside it: a Format command,
+    /// Enter, undo, external text); its end judges the replacement.
     fn flush_held(&self) {
-        let held = self.tracker.borrow_mut().flush();
-        if let Some(before) = held {
-            self.judge(&before, DeleteDirection::Unknown, self.text());
+        if self.bridging.replace(false) {
+            self.buffer.end_user_action();
         }
     }
 

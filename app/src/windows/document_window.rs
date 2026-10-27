@@ -17,21 +17,18 @@
 //! on deactivation and at Quit, deleted on Save / Save As and on Don't Save.
 
 use std::cell::{Cell, RefCell};
-#[cfg(feature = "selftest")]
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
-use md_core::book::book_folder;
 use md_core::document::page_size::PageSize;
 use md_core::document::view_mode::ViewMode;
 use md_logic::commands::{CommandArgument, CommandDispatcher, CommandId, DiagramRef, ShellSnapshot};
 use md_logic::documents::{SessionRole, TextFileSession, document_loader, file_names};
 use md_logic::exec::{Completion, LocalBoxFuture, Spawner};
-use md_logic::preview::{PreviewCoordinator, asset_origin};
-use md_logic::seams::{Alerts, CloseChoice, FileWatcher, Pickers, Scheduler, TimerHandle, UiThread, WindowId};
+use md_logic::preview::PreviewCoordinator;
+use md_logic::seams::{Alerts, CloseChoice, FileWatcher, Pickers, Scheduler, TimerHandle, WindowId};
 use md_logic::settings::{SettingsStore, TypingSettings, settings_keys, wrap_selection_setting};
 use md_logic::strings;
 use md_logic::view::{
@@ -51,6 +48,7 @@ use crate::menus::menu_bar::MenuBar;
 use crate::services::alerts::AdwAlerts;
 use crate::services::document_ops;
 use crate::services::file_watcher::GioFileWatcher;
+use crate::services::paths::display_folder;
 use crate::services::pickers::GtkPickers;
 use crate::theme;
 use crate::web::preview_host::PreviewHost;
@@ -58,27 +56,6 @@ use crate::windows::host::{WindowHost, WindowKind};
 
 /// How long a closing window waits for an export or print in flight (§1.5).
 pub const OUTPUT_WAIT: Duration = Duration::from_secs(10);
-
-/// md-logic gap: no `strings::documents` title for a failed Move To… yet; the alert's title until one
-/// lands (the Mac's wording for a failed move).
-const COULD_NOT_MOVE: &str = "Could not move";
-
-/// A folder as the header subtitle and Open Recent show it: `$HOME` written `~`.
-pub fn display_folder(folder: &str) -> String {
-    let home = glib::home_dir();
-    let home = home.to_string_lossy();
-    if !home.is_empty() && home != "/" {
-        if folder == home {
-            return String::from("~");
-        }
-        if let Some(rest) = folder.strip_prefix(home.as_ref())
-            && rest.starts_with('/')
-        {
-            return format!("~{rest}");
-        }
-    }
-    folder.to_string()
-}
 
 /// The exports and prints running for a window, so a close can wait for them (§1.5, §7.1).
 #[derive(Default)]
@@ -136,7 +113,7 @@ pub struct DocumentWindow {
     coordinator: Rc<PreviewCoordinator>,
     bar: Rc<DocumentBar>,
     footer: Rc<Footer>,
-    _capsule: Rc<ZenCapsule>,
+    capsule: Rc<ZenCapsule>,
     alerts: Rc<AdwAlerts>,
     pickers: Rc<GtkPickers>,
     exports: Rc<WindowExports>,
@@ -147,15 +124,15 @@ pub struct DocumentWindow {
     zen: Rc<ZenController>,
     derived: Rc<DerivedTextScheduler>,
     dispatcher: Rc<CommandDispatcher>,
-    /// Every command this window registered a handler for (the integration gate's rule).
-    #[cfg(feature = "selftest")]
-    wired: RefCell<HashSet<CommandId>>,
     /// The `UntitledNames` ordinal this window holds while it is "Untitled N".
     untitled: Cell<Option<usize>>,
     draft: RefCell<Option<PathBuf>>,
     draft_timer: RefCell<Option<TimerHandle>>,
     outputs: Rc<Outputs>,
     bar_state: RefCell<BarState>,
+    /// A file dialog of this window is up (`GtkPickers::open_changed`); alerts and About are the
+    /// window's visible dialog. Either turns every `win.` command off (§2.2).
+    picker_open: Cell<bool>,
     applied: Cell<Option<(ViewMode, bool, bool)>>,
     undo_generation: Cell<u64>,
     closing: Cell<bool>,
@@ -221,8 +198,7 @@ impl DocumentWindow {
         let modes = ViewModeController::new(
             state.clone(),
             Rc::new(SettingsViewModeStore::new(shell.settings.clone())),
-            // MERGE (P5): `shell.book.article_opens()` — the library host owns the one instance.
-            shell.windows.book_article_opens(),
+            shell.book.article_opens(),
         );
         let zen = ZenController::new(state.clone(), Some(shell.scheduler.clone()));
         let capsule = ZenCapsule::new(&overlay, zen.clone());
@@ -232,12 +208,7 @@ impl DocumentWindow {
             shell.off_thread.clone(),
             shell.words.clone(),
         );
-        let coordinator = PreviewCoordinator::new(
-            preview.surface(),
-            shell.scheduler.clone(),
-            shell.spawner.clone(),
-            preview_index_url(&preview, id),
-        );
+        let coordinator = preview.coordinator(shell);
 
         let window_rc = Rc::new_cyclic(|me: &Weak<DocumentWindow>| {
             let host: Weak<dyn WindowHost> = me.clone();
@@ -259,7 +230,7 @@ impl DocumentWindow {
                 coordinator,
                 bar,
                 footer,
-                _capsule: capsule,
+                capsule,
                 alerts,
                 pickers,
                 exports,
@@ -270,13 +241,12 @@ impl DocumentWindow {
                 zen,
                 derived,
                 dispatcher,
-                #[cfg(feature = "selftest")]
-                wired: RefCell::new(HashSet::new()),
                 untitled: Cell::new(None),
                 draft: RefCell::new(None),
                 draft_timer: RefCell::new(None),
                 outputs: Rc::new(Outputs::default()),
                 bar_state: RefCell::new(BarState::Hidden),
+                picker_open: Cell::new(false),
                 applied: Cell::new(None),
                 undo_generation: Cell::new(0),
                 closing: Cell::new(false),
@@ -372,6 +342,8 @@ impl DocumentWindow {
         self.state.changed().connect(move |_| {
             if let Some(w) = me.upgrade() {
                 w.apply_layout();
+                // The capsule's switch moves with Ctrl+1 / Ctrl+3 too (P3's contract).
+                w.capsule.refresh();
                 w.publish();
             }
         });
@@ -418,23 +390,36 @@ impl DocumentWindow {
             }
             glib::Propagation::Stop
         });
-        // The find bar has no change event of its own: its query and visibility reach the snapshot
-        // on the next key release or focus move (Find Next lights up as soon as a query is typed).
-        let keys = gtk::EventControllerKey::new();
-        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        // The find bar's query and visibility (Find Next lights up as soon as a query is typed),
+        // the focus (the editing rows follow the focused widget), the dialogs (§2.2).
         let me = self.me.clone();
-        keys.connect_key_released(move |_, _, _, _| {
-            let me = me.clone();
-            Shell::get().ui.post(Box::new(move || {
-                if let Some(w) = me.upgrade() {
-                    w.publish();
-                }
-            }));
+        self.panes.find_bar().changed().connect(move |_| {
+            if let Some(w) = me.upgrade() {
+                w.publish();
+            }
         });
-        self.window.add_controller(keys);
         let me = self.me.clone();
         self.window.connect_focus_widget_notify(move |_| {
             if let Some(w) = me.upgrade() {
+                w.publish();
+            }
+        });
+        let me = self.me.clone();
+        self.window.connect_visible_dialog_notify(move |_| {
+            if let Some(w) = me.upgrade() {
+                w.publish();
+            }
+        });
+        let me = self.me.clone();
+        self.alerts.open_changed().connect(move |_| {
+            if let Some(w) = me.upgrade() {
+                w.publish();
+            }
+        });
+        let me = self.me.clone();
+        self.pickers.open_changed().connect(move |open| {
+            if let Some(w) = me.upgrade() {
+                w.picker_open.set(*open);
                 w.publish();
             }
         });
@@ -463,8 +448,6 @@ impl DocumentWindow {
                 run(&w);
             }
         });
-        #[cfg(feature = "selftest")]
-        self.wired.borrow_mut().insert(id);
     }
 
     fn handle_with(&self, id: CommandId, run: impl Fn(&Rc<DocumentWindow>, &CommandArgument) + 'static) {
@@ -474,8 +457,6 @@ impl DocumentWindow {
                 run(&w, argument);
             }
         });
-        #[cfg(feature = "selftest")]
-        self.wired.borrow_mut().insert(id);
     }
 
     fn register_handlers(&self) {
@@ -685,8 +666,10 @@ impl DocumentWindow {
             self.title.set_title(&title);
             Self::shell().registry.set_title(self.id, &title);
         }
-        let subtitle =
-            session.editing_path().map(|path| display_folder(file_names::directory_of(&path))).unwrap_or_default();
+        let folder = session.editing_path().map(|path| file_names::directory_of(&path).to_string());
+        // Save As…, Move To… and Open… start beside the document (§6.1).
+        self.pickers.set_document_folder(folder.as_deref());
+        let subtitle = folder.as_deref().map(display_folder).unwrap_or_default();
         if self.title.subtitle().as_str() != subtitle {
             self.title.set_subtitle(&subtitle);
         }
@@ -923,50 +906,29 @@ impl DocumentWindow {
         }
     }
 
-    /// Rename… (§6.4): a name prompt, the Mac's name rule, the extension kept.
+    /// Rename… (§6.4): a name prompt, the Mac's name rule, the extension kept; the session follows
+    /// the file.
     async fn rename_flow(self: Rc<Self>) {
         let Some(path) = self.session.editing_path() else { return };
-        let name = file_names::name_of(&path).to_string();
-        let stem = file_names::stem_of(&path).to_string();
-        let typed = self
-            .alerts
-            .prompt_name(
-                strings::documents::RENAME_TITLE.to_string(),
-                strings::documents::RENAME_MESSAGE.to_string(),
-                stem,
-                strings::documents::RENAME_TITLE.to_string(),
-            )
-            .await;
-        let Some(typed) = typed else { return };
-        let new_stem = book_folder::trimmed_prompt_name(&typed).to_string();
-        if !book_folder::is_valid_name(&new_stem) {
-            self.alerts
-                .warn(
-                    strings::documents::COULD_NOT_RENAME.to_string(),
-                    strings::documents::INVALID_NAME_MESSAGE.to_string(),
-                )
-                .await;
-            return;
-        }
-        let new_name = file_names::with_extension_of(&name, &new_stem);
-        if new_name == name {
-            return;
-        }
-        self.session.flush_now(false);
-        match document_ops::rename(&path, &new_name) {
-            Ok(new_path) => self.session.retarget(&new_path),
-            Err(message) => self.alerts.warn(strings::documents::COULD_NOT_RENAME.to_string(), message).await,
+        let session = Rc::clone(&self.session);
+        let flush = move || {
+            session.flush_now(false);
+        };
+        if let Some(new_path) = document_ops::rename_with_prompt(self.alerts.clone(), path, flush).await {
+            self.session.retarget(&new_path);
         }
     }
 
     /// Move To… (§6.4): a folder dialog, then the same follow-up as Rename.
     async fn move_flow(self: Rc<Self>) {
         let Some(path) = self.session.editing_path() else { return };
-        let Some(folder) = self.pickers.pick_folder(None).await else { return };
-        self.session.flush_now(false);
-        match document_ops::move_to(&path, &folder) {
-            Ok(new_path) => self.session.retarget(&new_path),
-            Err(message) => self.alerts.warn(COULD_NOT_MOVE.to_string(), message).await,
+        let session = Rc::clone(&self.session);
+        let flush = move || {
+            session.flush_now(false);
+        };
+        let moved = document_ops::move_with_picker(self.pickers.clone(), self.alerts.clone(), path, flush).await;
+        if let Some(new_path) = moved {
+            self.session.retarget(&new_path);
         }
     }
 
@@ -1132,6 +1094,8 @@ impl DocumentWindow {
         }
         self.closing.set(true);
         drop(self.draft_timer.borrow_mut().take());
+        // Whatever still renders after the close's wait stops quietly (§1.5).
+        self.exports.cancel();
         self.derived.cancel();
         self.session.dispose();
         self.watcher.stop();
@@ -1153,6 +1117,12 @@ impl DocumentWindow {
     /// The toplevel, for the manager.
     pub fn adw_window(&self) -> &adw::ApplicationWindow {
         &self.window
+    }
+
+    /// This window's exports — Print Book and Export Book render in them when the Book window is
+    /// closed (md.win §8.7).
+    pub fn exports(&self) -> Rc<WindowExports> {
+        Rc::clone(&self.exports)
     }
 
     // ---- the snapshot --------------------------------------------------------------------------
@@ -1191,7 +1161,7 @@ impl DocumentWindow {
                 .to_string(),
             sidebar_open: false,
             is_full_screen: self.window.is_fullscreen(),
-            dialog_open: self.window.visible_dialog().is_some(),
+            dialog_open: self.window.visible_dialog().is_some() || self.alerts.is_open() || self.picker_open.get(),
             find_bar_open: find.is_open(),
             continue_lists: typing.continue_lists,
             capitalize_sentences: typing.capitalize_sentences,
@@ -1199,10 +1169,10 @@ impl DocumentWindow {
         }
     }
 
-    /// Commands this window registered a handler for.
+    /// The window's dispatcher (the self-test asks it what is wired).
     #[cfg(feature = "selftest")]
-    pub fn wired(&self) -> HashSet<CommandId> {
-        self.wired.borrow().clone()
+    pub fn dispatcher(&self) -> Rc<CommandDispatcher> {
+        Rc::clone(&self.dispatcher)
     }
 
     /// The stored mode and Zen, as `session.json` would record them.
@@ -1223,6 +1193,12 @@ impl DocumentWindow {
         self.menu_bar.model()
     }
 
+    /// The conflict / save-error bar.
+    #[cfg(feature = "selftest")]
+    pub fn bar(&self) -> Rc<DocumentBar> {
+        Rc::clone(&self.bar)
+    }
+
     /// The editor pane (the self-test probes whether the real one is in).
     #[cfg(feature = "selftest")]
     pub fn editor(&self) -> Rc<crate::editor::editor_pane::EditorPane> {
@@ -1230,22 +1206,9 @@ impl DocumentWindow {
     }
 }
 
-/// The preview's own document URL, for the coordinator.
-///
-/// Interface request (P4): `PreviewHost` picks its `preview-<n>` host and does not say which
-/// (§4.4 lists no getter); until it publishes `index_url()`, the window names the host after its
-/// own id, which is what this adapter hands the coordinator.
-fn preview_index_url(_preview: &PreviewHost, id: WindowId) -> String {
-    asset_origin::index_url(&asset_origin::preview_host(id.0))
-}
-
 impl WindowHost for DocumentWindow {
     fn id(&self) -> WindowId {
         self.id
-    }
-
-    fn kind(&self) -> WindowKind {
-        WindowKind::Document
     }
 
     fn window(&self) -> gtk::Window {
@@ -1282,23 +1245,5 @@ impl WindowHost for DocumentWindow {
         }
         self.menu_bar.refresh(&snapshot);
         *self.last_snapshot.borrow_mut() = Some(snapshot);
-    }
-
-    fn is_dark(&self) -> bool {
-        theme::is_dark()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn folders_under_home_are_written_with_a_tilde() {
-        let home = glib::home_dir().to_string_lossy().into_owned();
-        assert_eq!(display_folder(&home), "~");
-        assert_eq!(display_folder(&format!("{home}/notes")), "~/notes");
-        assert_eq!(display_folder(&format!("{home}x/notes")), format!("{home}x/notes"));
-        assert_eq!(display_folder("/etc"), "/etc");
     }
 }

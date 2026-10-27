@@ -12,7 +12,6 @@
 //! hang on a dead window. GTK 4 emits `destroy` only once the last reference is gone, which the
 //! shell's own structs delay, so "gone" is the window leaving GTK's toplevel list (seen when it is
 //! unrealized) or, failing that, `destroy`.
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;

@@ -15,8 +15,12 @@
 //! across file systems does. Nothing goes under `OUT/home` beyond what `RecentFiles` and the
 //! settings put there — the `privacy` group checks that.
 //!
-//! The window-level rows of §13.3's `documents` line (each extension through `open`, the second
-//! `open` focusing, the conflict bar, drafts) need P1's window manager and are not here yet.
+//! The window-level rows of §13.3's `documents` line go through the window manager as GTK's
+//! `open` does: every extension md opens becomes a document window, a second `open` of the same
+//! path brings that window back instead of a new one, a TextPack / TextBundle opens as an untitled
+//! window titled after it, and an outside atomic save under unsaved edits raises the window's
+//! conflict bar. The drafts' rows (written, kept by Quit, restored by a relaunch) are the `shell`
+//! group's.
 
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -28,7 +32,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use md_core::export::text_bundle;
 use md_logic::activation::{ActivationAction, activation_router};
-use md_logic::documents::document_loader::{self, DocumentKind};
+use md_logic::documents::document_loader;
 use md_logic::documents::{SessionRole, Stage, TextFileSession, file_names};
 use md_logic::seams::{Alerts, CloseChoice, FileSystem, FileWatcher, Pickers};
 use md_logic::settings::SettingsStore;
@@ -42,7 +46,7 @@ use crate::services::document_ops;
 use crate::services::file_system::{CanonicalFileIdentity, StdFileSystem};
 use crate::services::file_watcher::GioFileWatcher;
 use crate::services::glib_seams::GlibScheduler;
-use crate::services::pickers::{GtkPickers, file_exists_question, finish_save};
+use crate::services::pickers::{GtkPickers, finish_save};
 
 /// How long a watcher row waits for the first report, and then for stragglers (the settle plus
 /// the coalescing, with room to spare).
@@ -69,6 +73,7 @@ pub async fn run(h: &Harness) {
     file_rows(h, &root.join("files")).await;
     import_rows(h, &root.join("imports")).await;
     session_rows(h, &scratch.join("session")).await;
+    window_rows(h, &scratch.join("windows")).await;
     recent_rows(h, &root.join("recent")).await;
     example_rows(h, &root.join("examples")).await;
     dialog_rows(h, &root.join("dialogs")).await;
@@ -399,32 +404,31 @@ async fn import_rows(h: &Harness, folder: &Path) {
         return;
     }
 
-    for (row, path, kind, title) in [
-        ("textpack_imports_titled", &pack, DocumentKind::TextPack, "Field Notes"),
-        ("textbundle_imports_titled", &bundle, DocumentKind::TextBundleFolder, "Trip"),
-    ] {
+    let shell = h.shell();
+    for (row, path, title) in
+        [("textpack_imports_titled", &pack, "Field Notes"), ("textbundle_imports_titled", &bundle, "Trip")]
+    {
         let path = string(path);
-        let loaded = document_ops::import(&path);
         let session = session(GioFileWatcher::new());
         let opened = session.open(&path);
-        let ok = loaded.as_ref().is_ok_and(|d| d.kind == kind && d.title == title && d.text == text)
-            && opened
+        let session_ok = opened
             && session.title() == title
             && session.stage() == Stage::Untitled
             && session.imported_from().as_deref() == Some(path.as_str())
             && session.text() == text;
-        h.check(
-            row,
-            ok,
-            format!(
-                "import: {:?}; session: opened {opened}, title \u{201C}{}\u{201D}, stage {:?}, imported from {:?}",
-                loaded.as_ref().map(|d| (&d.title, d.kind)),
-                session.title(),
-                session.stage(),
-                session.imported_from()
-            ),
-        );
+        let session_seen = format!("{opened}, \u{201C}{}\u{201D}, {:?}", session.title(), session.stage());
         session.dispose();
+        // The same file handed to md by `open` (or a drop): an untitled window titled after it.
+        let before: Vec<_> = shell.windows.documents().iter().map(|w| w.id()).collect();
+        shell.windows.open_files(&[gio::File::for_path(&path)]);
+        let window = shell.windows.documents().into_iter().find(|w| !before.contains(&w.id()));
+        let window_title = window.as_ref().and_then(|w| w.adw_window().title()).map(|t| t.to_string());
+        let window_ok = window.as_ref().is_some_and(|w| w.path().is_none() && w.text() == text)
+            && window_title.as_deref().is_some_and(|t| t == title || t.starts_with(&format!("{title} \u{2014}")));
+        if let Some(window) = window {
+            shell.windows.close_window(&window);
+        }
+        h.check(row, session_ok && window_ok, format!("session: {session_seen}; window: {window_title:?}"));
     }
 
     // A .textbundle folder handed over by `open` or a drop routes to the import; a file merely
@@ -623,6 +627,115 @@ enum Refusal {
     Conflict,
 }
 
+// ---- document windows (§1.3, §6.3) ----
+
+/// Every extension md opens, through the window manager as GTK's `open` hands files over; the
+/// second `open` of a path; the conflict bar of a real window. On a native file system (see
+/// [`run`]), as the monitor needs.
+async fn window_rows(h: &Harness, folder: &Path) {
+    if let Err(err) = fresh(folder) {
+        h.check("windows", false, format!("{}: {err}", folder.display()));
+        return;
+    }
+    let shell = h.shell();
+    let windows = &shell.windows;
+    let wait_window = |path: String| {
+        let windows = Rc::clone(&shell.windows);
+        async move {
+            let mut found = None;
+            for _ in 0..40 {
+                found = windows.documents().into_iter().find(|w| w.path().as_deref() == Some(path.as_str()));
+                if found.is_some() {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(50)).await;
+            }
+            found
+        }
+    };
+
+    // Each extension in a window of its own, titled by its name.
+    let mut opened = Vec::new();
+    let mut failed = Vec::new();
+    for (index, extension) in document_loader::open_extensions().iter().enumerate() {
+        if extension == ".textpack" {
+            continue; // a bundle, not a document: the import rows
+        }
+        let path = folder.join(format!("doc{index}{extension}"));
+        if std::fs::write(&path, format!("# {extension}\n")).is_err() {
+            failed.push(format!("{extension}: not written"));
+            continue;
+        }
+        windows.open_files(&[gio::File::for_path(&path)]);
+        match wait_window(string(&path)).await {
+            Some(window) => {
+                let title = window.adw_window().title().map(|t| t.to_string()).unwrap_or_default();
+                if title == format!("doc{index}") && window.text() == format!("# {extension}\n") {
+                    opened.push(extension.clone());
+                } else {
+                    failed.push(format!("{extension}: \u{201C}{title}\u{201D}"));
+                }
+                windows.close_window(&window);
+            }
+            None => failed.push(format!("{extension}: no window")),
+        }
+    }
+    h.check(
+        "open_every_extension_in_a_window",
+        failed.is_empty() && !opened.is_empty(),
+        format!("{} opened ({}); failed {failed:?}", opened.len(), opened.join(" ")),
+    );
+
+    // A second `open` of the same path brings its window back.
+    let doc = folder.join("conflict.md");
+    let _ = std::fs::write(&doc, "one\n");
+    windows.open_files(&[gio::File::for_path(&doc)]);
+    let Some(window) = wait_window(string(&doc)).await else {
+        h.check("second_open_same_window", false, "the document did not open");
+        return;
+    };
+    let count = windows.documents().len();
+    windows.open_files(&[gio::File::for_path(&doc)]);
+    h.sleep(Duration::from_millis(300)).await;
+    let again = wait_window(string(&doc)).await;
+    h.check(
+        "second_open_same_window",
+        windows.documents().len() == count && again.is_some_and(|w| w.id() == window.id()),
+        format!("{count} window(s) before, {} after", windows.documents().len()),
+    );
+
+    // Unsaved edits, then another editor's atomic save: the window shows the conflict bar, and
+    // Keep My Version puts the window's text back on disk.
+    let editor = window.editor();
+    editor.replace_range_utf16(0, 0, "mine ");
+    let replaced = std::fs::write(folder.join(".conflict.md.tmp"), "theirs\n")
+        .and_then(|()| std::fs::rename(folder.join(".conflict.md.tmp"), &doc));
+    let bar = window.bar();
+    let shown = h.wait_until(Duration::from_secs(3), || bar.is_shown()).await;
+    let texts = bar.texts();
+    h.screenshot("conflict-bar").await;
+    bar.press(false);
+    let kept = h
+        .wait_until(Duration::from_secs(4), || {
+            std::fs::read_to_string(&doc).ok().as_deref() == Some("mine one\n") && !bar.is_shown()
+        })
+        .await;
+    h.check(
+        "window_conflict_bar",
+        replaced.is_ok()
+            && shown
+            && texts
+                == (
+                    strings::documents::FILE_CHANGED_ON_DISK.to_string(),
+                    strings::buttons::RELOAD_FROM_DISK.to_string(),
+                    strings::buttons::KEEP_MY_VERSION.to_string(),
+                )
+            && kept,
+        format!("bar {shown} {texts:?}; Keep My Version wrote it back {kept}"),
+    );
+    windows.close_window(&window);
+}
+
 /// Makes writes to `path` fail: read-only when that stops this process, else (root) not at all —
 /// the caller then refuses by conflict.
 fn refuse_writes(path: &Path) -> Refusal {
@@ -748,8 +861,8 @@ async fn example_rows(h: &Harness, folder: &Path) {
         h.check("example_book_unpacks", false, err.to_string());
         return;
     }
-    let first = shell.examples.unpack_book(&string(folder));
-    let second = shell.examples.unpack_book(&string(folder));
+    let first = shell.book.unpack_example_book_into(&string(folder));
+    let second = shell.book.unpack_example_book_into(&string(folder));
     let source = shell.examples.book_folder();
     let same_tree =
         first.as_ref().is_ok_and(|copy| tree(Path::new(copy)) == tree(&source) && !tree(&source).is_empty());
@@ -1158,7 +1271,7 @@ async fn picker_rows(h: &Harness, window: &adw::ApplicationWindow, alerts: Rc<dy
         None
     };
     let got = answer_alert(h, window, &answer, Answer::Escape, "picker-save-replace").await;
-    let question = file_exists_question("Draft.md");
+    let question = md_logic::strings::documents::file_exists_question("Draft.md");
     h.check(
         "save_asks_before_replacing_a_completed_name",
         asked == Some(Some(question.clone()))

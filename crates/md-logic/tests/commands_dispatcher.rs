@@ -319,3 +319,19 @@ fn every_root_accelerator_can_be_wired_and_invoked() {
     assert!(dispatcher.try_invoke(CommandId::Escape, NONE));
     assert_eq!(*escaped.borrow(), 1);
 }
+
+// ── LINUX: the integration gate's question ───────────────────────────────────────────────
+
+#[test]
+fn is_wired_answers_for_registration_whatever_the_enablement() {
+    let f = Fixture::new();
+    let dispatcher = f.new_dispatcher();
+    assert!(!dispatcher.is_wired(CommandId::Save));
+    dispatcher.register(CommandId::Save, || {});
+    dispatcher.register_with_argument(CommandId::Contents, |_| {});
+    assert!(dispatcher.is_wired(CommandId::Save));
+    assert!(dispatcher.is_wired(CommandId::Contents));
+    // Contents is disabled without an outline: wired all the same, never invocable.
+    assert!(!dispatcher.can_invoke(CommandId::Contents));
+    assert!(!dispatcher.is_wired(CommandId::Bold));
+}

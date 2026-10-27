@@ -15,9 +15,6 @@
 //! CORS-enabled, never `local` (which breaks the module scripts); every response
 //! `Cache-Control: no-store`, so `reload()` re-requests `index.html` and picks up the new page; the
 //! CSP on `index.html` only.
-// P4 → P1 / P5: until the windows construct previews and exports, only the self-test reaches this;
-// removed at the integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

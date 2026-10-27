@@ -31,8 +31,8 @@ use md_logic::commands::{
 };
 use md_logic::documents::{SessionRole, Stage, TextFileSession};
 use md_logic::exec::{LocalBoxFuture, Spawner};
-use md_logic::preview::{PreviewCoordinator, asset_origin};
-use md_logic::seams::{Alerts, Clock, DocumentRegistry, OffThread, OffThreadValue, OffThreadWork, Pickers, WindowId};
+use md_logic::preview::PreviewCoordinator;
+use md_logic::seams::{Alerts, Clock, DocumentRegistry, Pickers, WindowId};
 use md_logic::settings::{SettingsStore, TypingSettings, settings_keys, wrap_selection_setting};
 use md_logic::strings::{self, books, buttons, documents};
 use md_logic::text::note_preview;
@@ -53,6 +53,7 @@ use crate::menus::actions::install_window_actions;
 use crate::menus::menu_bar::MenuBar;
 use crate::services::alerts::AdwAlerts;
 use crate::services::file_watcher::GioFileWatcher;
+use crate::services::paths::display_folder;
 use crate::services::pickers::GtkPickers;
 use crate::theme;
 use crate::web::preview_host::PreviewHost;
@@ -294,8 +295,9 @@ pub struct BookWindow {
     bar_state: RefCell<BarState>,
     rendering: Cell<bool>,
     syncing_toolbar: Cell<bool>,
-    /// An alert is up in this window: every `win.` command is off until it answers (§2.2).
-    dialog_open: Cell<bool>,
+    /// A file dialog of this window is up (`GtkPickers::open_changed`); with an alert or About
+    /// (the window's visible dialog) every `win.` command is off until it answers (§2.2).
+    picker_open: Cell<bool>,
     closing: Cell<bool>,
     closed: Cell<bool>,
     outputs_in_flight: Rc<Cell<usize>>,
@@ -385,16 +387,11 @@ impl BookWindow {
         let panes = ArticlePanes::new(shell, PanesRole::BookArticle);
         let preview = PreviewHost::new(&shell.web);
         panes.set_preview(&preview);
-        let coordinator = PreviewCoordinator::new(
-            preview.surface(),
-            shell.scheduler.clone(),
-            shell.spawner.clone(),
-            preview_index_url(&preview),
-        );
+        let coordinator = preview.coordinator(shell);
         let derived = DerivedTextScheduler::new(
             shell.scheduler.clone(),
             shell.spawner.clone(),
-            Rc::new(GioBlocking),
+            shell.off_thread.clone(),
             shell.words.clone(),
         );
         let bar = DocumentBar::new();
@@ -485,7 +482,7 @@ impl BookWindow {
                 bar_state: RefCell::new(BarState::Hidden),
                 rendering: Cell::new(false),
                 syncing_toolbar: Cell::new(false),
-                dialog_open: Cell::new(false),
+                picker_open: Cell::new(false),
                 closing: Cell::new(false),
                 closed: Cell::new(false),
                 outputs_in_flight: Rc::new(Cell::new(0)),
@@ -594,13 +591,21 @@ impl BookWindow {
         let publish = on(BookWindow::publish);
         editor.history_changed().connect(move |_| publish());
         editor.use_settings(Some(Rc::clone(&self.settings)));
+        let publish = on(BookWindow::publish);
+        self.alerts.open_changed().connect(move |_| publish());
         let weak = self.me.clone();
-        self.alerts.open_changed().connect(move |open: &bool| {
+        self.pickers.open_changed().connect(move |open: &bool| {
             if let Some(book) = weak.upgrade() {
-                book.dialog_open.set(*open);
+                book.picker_open.set(*open);
                 book.publish();
             }
         });
+        let publish = on(BookWindow::publish);
+        self.window.connect_visible_dialog_notify(move |_| publish());
+        let publish = on(BookWindow::publish);
+        self.window.connect_focus_widget_notify(move |_| publish());
+        let publish = on(BookWindow::publish);
+        self.panes.find_bar().changed().connect(move |_| publish());
         let footer = Rc::downgrade(&self.footer);
         self.exports.busy_changed().connect(move |busy: &bool| {
             if let Some(footer) = footer.upgrade() {
@@ -949,6 +954,9 @@ impl BookWindow {
                 book.panes.find_bar().show_replace();
             }),
         );
+        // Escape from anywhere in the window (its key controller, §2.2) closes an open find bar; the
+        // Book window has no Zen to leave.
+        d.register(CommandId::Escape, on(|book| book.panes.find_bar().close()));
         d.register(CommandId::FindNext, on(|book| book.panes.find_bar().find_next(true)));
         d.register(CommandId::FindPrevious, on(|book| book.panes.find_bar().find_next(false)));
         d.register(CommandId::UseSelectionForFind, on(|book| book.panes.find_bar().use_selection()));
@@ -1129,10 +1137,11 @@ impl BookWindow {
         self.me.upgrade().expect("a live Book window")
     }
 
-    /// File ▸ Duplicate: the article's text in a new untitled document window.
+    /// File ▸ Duplicate: the article's text in a new untitled document window, titled
+    /// "{article} copy" as a document's duplicate is (§6.4).
     fn duplicate(&self) {
         if matches!(self.session.stage(), Stage::Editing(_)) {
-            self.shell.windows.open_untitled(Some(self.session.text()), true);
+            self.shell.windows.duplicate(self.session.text(), &self.session.title());
         }
     }
 
@@ -1236,7 +1245,7 @@ impl BookWindow {
         let title = window_title::for_book(book.map(Book::name), article.as_deref());
         self.window.set_title(Some(&title));
         self.title.set_title(&title);
-        let folder = book.map(|book| display_folder(&book.root, &glib::home_dir().to_string_lossy()));
+        let folder = book.map(|book| display_folder(&book.root));
         self.title.set_subtitle(folder.as_deref().unwrap_or(""));
     }
 
@@ -1379,12 +1388,11 @@ impl BookWindow {
             ),
             // An article has no Save As (its file IS its place in the book, §8.5): Retry is the
             // way out, and the next keystroke's autosave tries again too.
-            BarState::SaveError(error) => self.bar.show_save_error(
+            BarState::SaveError(error) => self.bar.show_save_error_retry_only(
                 &documents::could_not_save(&error),
                 with_session(|session| {
                     session.flush_now(true);
                 }),
-                || {},
             ),
         }
     }
@@ -1446,6 +1454,13 @@ impl BookWindow {
         });
     }
 
+    /// Resolves when no export or print of this window runs, or at `deadline` (Quit's wait, §1.5).
+    pub async fn wait_outputs(&self, deadline: std::time::Instant) {
+        while self.outputs_in_flight.get() > 0 && std::time::Instant::now() < deadline {
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+    }
+
     /// File ▸ Quit and logout (§1.5 routes 2 and 3): the article is written now, a failed write
     /// goes to a rescue copy, nothing is asked. The window answers `query-end` itself; Quit's
     /// window manager may call it before destroying the window (the destroy flushes too).
@@ -1464,6 +1479,8 @@ impl BookWindow {
             undo();
         }
         self.panes.editor().use_settings(None);
+        // Whatever still renders after the close's wait stops quietly (§1.5).
+        self.exports.cancel();
         self.derived.cancel();
         self.coordinator.hide();
         self.preview.close();
@@ -1490,10 +1507,6 @@ impl BookWindow {
 impl WindowHost for BookWindow {
     fn id(&self) -> WindowId {
         BOOK_WINDOW_ID
-    }
-
-    fn kind(&self) -> WindowKind {
-        WindowKind::Book
     }
 
     fn window(&self) -> gtk::Window {
@@ -1563,7 +1576,7 @@ impl WindowHost for BookWindow {
                 .to_string(),
             sidebar_open: self.sidebar_open(),
             is_full_screen: self.window.is_fullscreen(),
-            dialog_open: self.dialog_open.get(),
+            dialog_open: self.window.visible_dialog().is_some() || self.alerts.is_open() || self.picker_open.get(),
             find_bar_open: find_bar.is_open(),
             continue_lists: typing.continue_lists,
             capitalize_sentences: typing.capitalize_sentences,
@@ -1578,48 +1591,6 @@ impl WindowHost for BookWindow {
         if !self.closed.get() {
             self.menu_bar.refresh(&self.snapshot());
         }
-    }
-
-    fn is_dark(&self) -> bool {
-        theme::is_dark()
-    }
-}
-
-/// md-logic's `OffThread` over GLib's blocking pool (shell-design §5.5): the derived text's word
-/// count and outline are computed there and published back on the main context.
-///
-/// REQUEST (P1): one shared instance beside the Shell's other GLib seams; the document window
-/// needs the same. This private one is removed when that lands.
-struct GioBlocking;
-
-impl OffThread for GioBlocking {
-    fn spawn_blocking(&self, work: OffThreadWork) -> LocalBoxFuture<'static, Option<OffThreadValue>> {
-        let handle = gio::spawn_blocking(work);
-        Box::pin(async move { handle.await.ok() })
-    }
-}
-
-/// The preview's document URL, which the coordinator navigates to.
-///
-/// MERGE (P4): `PreviewHost` owns its `preview-<n>` host; the frozen interface does not expose
-/// it yet (requested: `PreviewHost::index_url()`). At P5's merge this body becomes that call.
-/// Until then the S0 stub surface ignores every navigation, so any well-formed URL will do.
-fn preview_index_url(_preview: &PreviewHost) -> String {
-    asset_origin::index_url(&asset_origin::preview_host(0))
-}
-
-/// A folder as the header subtitle shows it: the home folder written `~` (§1.4).
-pub fn display_folder(path: &str, home: &str) -> String {
-    let home = home.trim_end_matches('/');
-    if home.is_empty() {
-        return path.to_string();
-    }
-    if path == home {
-        return "~".to_string();
-    }
-    match path.strip_prefix(home) {
-        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
-        _ => path.to_string(),
     }
 }
 
@@ -1644,6 +1615,11 @@ impl BookWindow {
 
     pub fn gtk_window(&self) -> adw::ApplicationWindow {
         self.window.clone()
+    }
+
+    /// The window's real file dialogs, whose answers the self-test can queue.
+    pub fn gtk_pickers(&self) -> Rc<GtkPickers> {
+        Rc::clone(&self.pickers)
     }
 
     pub fn paned(&self) -> gtk::Paned {
@@ -1679,19 +1655,5 @@ impl BookWindow {
 
     pub fn mode_button(&self, mode: ViewMode) -> Option<gtk::ToggleButton> {
         self.toolbar.modes.iter().find(|(_, m)| *m == mode).map(|(button, _)| button.clone())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_home_folder_is_written_as_a_tilde() {
-        assert_eq!(display_folder("/home/ann/Books/Novel", "/home/ann"), "~/Books/Novel");
-        assert_eq!(display_folder("/home/ann", "/home/ann/"), "~");
-        assert_eq!(display_folder("/home/anna/Book", "/home/ann"), "/home/anna/Book");
-        assert_eq!(display_folder("/srv/Книга", "/home/ann"), "/srv/Книга");
-        assert_eq!(display_folder("/srv/Book", ""), "/srv/Book");
     }
 }

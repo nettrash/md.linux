@@ -495,7 +495,8 @@ both), GNOME on Wayland, with the user's own account. Tick each line; note the b
     log out and in, relaunch: the file and its layout return.
 11. File ▸ Print… shows GTK's dialog; Print to File writes a PDF; Export ▸ PDF… / HTML… / EPUB… write
     files that open in the Document Viewer, a browser and Foliate.
-12. The P1–P5 real-desktop lists (`docs/shell-work-packages.md` §5) on the same machine.
+12. `docs/desktop-checklist.md` on the same machine — every package's real-desktop list, gathered
+    and ordered by risk.
 
 **Uninstall**
 

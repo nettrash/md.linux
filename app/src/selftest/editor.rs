@@ -478,7 +478,26 @@ async fn jumps(h: &Harness, rig: &Rig) {
 async fn scroll_sync(h: &Harness, rig: &Rig) {
     let long: String = (0..400).map(|i| format!("Line {i}\n")).collect();
     rig.editor.set_text(&long);
-    h.sleep(Duration::from_millis(300)).await;
+    // GtkTextView lays a long text out in idle chunks, and the adjustment's upper bound grows as it
+    // does: a fraction set before it settles is a fraction of an estimate (under load the full
+    // run measured 0.115 for 0.5). Wait until the height has stopped changing.
+    let adjustment = rig.editor.text_view().vadjustment().expect("a scrollable text view");
+    let mut last = -1.0;
+    let mut steady = 0;
+    for _ in 0..100 {
+        h.next_frame(&rig.window).await;
+        h.sleep(Duration::from_millis(30)).await;
+        let upper = adjustment.upper();
+        if (upper - last).abs() < 0.5 {
+            steady += 1;
+            if steady >= 5 {
+                break;
+            }
+        } else {
+            steady = 0;
+            last = upper;
+        }
+    }
     let reported = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&reported);
     let id = rig.editor.scrolled().connect(move |f| sink.borrow_mut().push(*f));
@@ -487,7 +506,6 @@ async fn scroll_sync(h: &Harness, rig: &Rig) {
     rig.preview.did_scroll().emit(&0.5);
     h.sleep(Duration::from_millis(100)).await;
     let echoed = reported.borrow().len();
-    let adjustment = rig.editor.text_view().vadjustment().expect("a scrollable text view");
     let applied = adjustment.value() / (adjustment.upper() - adjustment.page_size());
     // A scroll of the editor's own is reported as a fraction.
     adjustment.set_value((adjustment.upper() - adjustment.page_size()) * 0.25);
@@ -716,23 +734,32 @@ async fn wrap(h: &Harness, rig: &Rig, settings: &Rc<crate::services::settings_st
         format!("selection after the wrap: {selection:?} {selected:?}"),
     );
 
-    // Undo: the wrap is its own step; then GTK's own two for typing over a selection (GTK 4.22
-    // splits a typed replacement of more than one character into a deletion and an insertion).
+    // Undo, as on the Mac and md.win: the wrap is its own step, then the typed replacement is one
+    // more (GTK 4.22 splits a typed replacement of more than one character into a deletion and an
+    // insertion; the pane bridges them into one undo step).
     let mut steps = vec![rig.editor.text()];
-    for _ in 0..3 {
+    for _ in 0..2 {
         h.key("ctrl+z").await;
         h.sleep(Duration::from_millis(60)).await;
         steps.push(rig.editor.text());
     }
     let restored = rig.editor.selection_utf16();
-    let ok = steps[1] == "a * b" && steps[3] == "a word b" && restored == (2, 4);
+    let ok = steps[1] == "a * b" && steps[2] == "a word b" && restored == (2, 4);
     h.check(
         "wrap_one_undo",
         ok,
         format!(
-            "Ctrl+Z ×3: {steps:?}; the word comes back selected {restored:?} — the first Ctrl+Z undoes the wrap alone"
+            "Ctrl+Z ×2: {steps:?}; the word comes back selected {restored:?} — the first Ctrl+Z undoes the wrap alone, \
+             the second the typed `*`"
         ),
     );
+    // Redo walks the same two steps forward.
+    for _ in 0..2 {
+        h.key("ctrl+shift+z").await;
+        h.sleep(Duration::from_millis(60)).await;
+    }
+    let redone = rig.editor.text();
+    h.check("wrap_redo", redone == "a *word* b", format!("Shift+Ctrl+Z ×2: {redone:?}"));
 
     for (mark, want) in [("_", "a _word_ b"), ("`", "a `word` b"), ("$", "a $word$ b")] {
         reset(h, rig, "a word b", 2, 4).await;

@@ -12,11 +12,10 @@
 use std::cell::{Cell, RefCell};
 use std::ops::ControlFlow;
 use std::path::Path;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::time::Instant;
 
 use adw::prelude::*;
-use md_core::document::book_article_opens::BookArticleOpens;
 use md_logic::activation::{ActivationAction, ActivationDescription, ActivationItem, activation_router};
 use md_logic::commands::{CommandArgument, CommandId, RecentEntry, WindowTitle};
 use md_logic::documents::document_loader;
@@ -28,7 +27,9 @@ use md_logic::windows::{SessionBook, SessionState, UntitledNames, WindowRect};
 
 use crate::app::Shell;
 use crate::book::book_window::BookWindow;
+use crate::book::{self, BookOutputKind};
 use crate::menus::{about, actions};
+use crate::services::document_ops;
 use crate::services::paths::Paths;
 use crate::theme;
 use crate::windows::document_window::{DocumentWindow, OUTPUT_WAIT};
@@ -41,10 +42,8 @@ pub struct WindowManager {
     session_file: SessionFile,
     drafts: Drafts,
     windows: RefCell<Vec<Rc<DocumentWindow>>>,
-    book: RefCell<Option<Weak<dyn WindowHost>>>,
     next_id: Cell<u64>,
     untitled: RefCell<UntitledNames>,
-    book_opens: Rc<RefCell<BookArticleOpens>>,
     recent: RefCell<Vec<RecentEntry>>,
     /// No activation has been handled yet: the next one is the process's first (§1.3).
     first: Cell<bool>,
@@ -59,10 +58,8 @@ impl WindowManager {
             session_file: SessionFile::new(paths.session_file()),
             drafts: Drafts::new(paths.drafts_dir()),
             windows: RefCell::new(Vec::new()),
-            book: RefCell::new(None),
             next_id: Cell::new(1),
             untitled: RefCell::new(UntitledNames::new()),
-            book_opens: Rc::new(RefCell::new(BookArticleOpens::new())),
             recent: RefCell::new(Vec::new()),
             first: Cell::new(true),
             new_window: Cell::new(false),
@@ -108,13 +105,12 @@ impl WindowManager {
 
     /// Book ▸ Show Book.
     pub fn show_book(&self) {
-        self.show_book_host();
+        BookWindow::show(&Shell::get());
     }
 
-    /// `WindowId(0)` is the Book window ([`book_entry::BOOK_WINDOW_ID`]); document windows count
-    /// from 1.
+    /// `WindowId(0)` is the Book window ([`book::BOOK_WINDOW_ID`]); document windows count from 1.
     pub fn host(&self, id: WindowId) -> Option<Rc<dyn WindowHost>> {
-        if id == book_entry::BOOK_WINDOW_ID {
+        if id == book::BOOK_WINDOW_ID {
             return self.book_host();
         }
         let window = self.windows.borrow().iter().find(|w| w.id() == id).cloned()?;
@@ -134,13 +130,16 @@ impl WindowManager {
         }
         self.prepare_quit();
         let windows = self.documents();
-        let book = self.book_host();
+        let book = BookWindow::current();
         let shell = Shell::get();
         let app = shell.app.clone();
         shell.spawner.spawn_local(Box::pin(async move {
             let deadline = Instant::now() + OUTPUT_WAIT;
             for window in &windows {
                 window.wait_outputs(deadline).await;
+            }
+            if let Some(book) = &book {
+                book.wait_outputs(deadline).await;
             }
             for window in windows {
                 window.teardown();
@@ -155,12 +154,6 @@ impl WindowManager {
 
     // ---- the rest of the manager ---------------------------------------------------------------
 
-    /// The one `BookArticleOpens` every document window's view-mode controller claims from and the
-    /// book navigator marks (md-logic `ViewModeController`'s LINUX DECISION).
-    pub fn book_article_opens(&self) -> Rc<RefCell<BookArticleOpens>> {
-        Rc::clone(&self.book_opens)
-    }
-
     pub fn drafts(&self) -> &Drafts {
         &self.drafts
     }
@@ -168,6 +161,11 @@ impl WindowManager {
     /// The live document windows, in creation order.
     pub fn documents(&self) -> Vec<Rc<DocumentWindow>> {
         self.windows.borrow().clone()
+    }
+
+    /// The document window `id`, while it is open.
+    pub fn document(&self, id: WindowId) -> Option<Rc<DocumentWindow>> {
+        self.windows.borrow().iter().find(|w| w.id() == id).cloned()
     }
 
     /// The md window behind a toplevel.
@@ -180,21 +178,10 @@ impl WindowManager {
         self.book_host().filter(|book| &book.window() == window)
     }
 
-    /// The Book window while it is open.
-    ///
-    /// MERGE (P5): `BookWindow::current()` — it also knows a Book window P5's own code showed;
-    /// until then the one [`WindowManager::show_book`] showed.
+    /// The Book window while it is open — however it was shown (Show Book, a library flow, a
+    /// restored session).
     fn book_host(&self) -> Option<Rc<dyn WindowHost>> {
-        let book = self.book.borrow().as_ref().and_then(Weak::upgrade)?;
-        let app = Shell::get().app.clone();
-        app.windows().contains(&book.window()).then_some(book)
-    }
-
-    fn show_book_host(&self) -> Rc<dyn WindowHost> {
-        let book = BookWindow::show(&Shell::get());
-        let host: Rc<dyn WindowHost> = book;
-        *self.book.borrow_mut() = Some(Rc::downgrade(&host));
-        host
+        BookWindow::current().map(|book| book as Rc<dyn WindowHost>)
     }
 
     /// The window an app command's dialogs belong to: the focused md window, else the one most
@@ -300,6 +287,9 @@ impl WindowManager {
         for window in self.documents() {
             window.quit_flush();
         }
+        if let Some(book) = BookWindow::current() {
+            book.quit_flush();
+        }
         self.write_session();
     }
 
@@ -388,12 +378,8 @@ impl WindowManager {
         let mut items = Vec::new();
         let mut unreadable = Vec::new();
         for file in files {
-            let folder =
-                file.query_file_type(gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE) == gio::FileType::Directory;
-            match file.path().and_then(|p| p.to_str().map(str::to_string)) {
-                Some(path) => {
-                    items.push(if folder { ActivationItem::folder(&path) } else { ActivationItem::file(&path) })
-                }
+            match document_ops::activation_item(file) {
+                Some(item) => items.push(item),
                 None => unreadable.push(file.uri().to_string()),
             }
         }
@@ -625,9 +611,9 @@ pub fn run_app_command(id: CommandId, argument: CommandArgument) {
                 windows.open_untitled(Some(text), true);
             }
         }
-        C::ExampleBook => book_entry::unpack_example_book(&shell, parent),
-        C::NewBook => book_entry::new_book(&shell, parent),
-        C::OpenBook => book_entry::open_book(&shell, parent),
+        C::ExampleBook => book::unpack_example_book(&shell, parent),
+        C::NewBook => book::new_book(&shell, parent),
+        C::OpenBook => book::open_book(&shell, parent),
         C::PdfPageSize => {
             if let CommandArgument::Text(page_size) = argument {
                 settings.set_string(settings_keys::PDF_PAGE_SIZE, &page_size);
@@ -638,11 +624,11 @@ pub fn run_app_command(id: CommandId, argument: CommandArgument) {
         C::CapitalizeSentences => TypingSettings::toggle(settings, settings_keys::CAPITALIZE_SENTENCES),
         C::WrapSelection => wrap_selection_setting::toggle(settings),
         C::ShowBook => windows.show_book(),
-        C::CloseBook => book_entry::close_book(&shell),
-        C::PrintBook => book_entry::run_book_output(&shell, parent, book_entry::BookOutputKind::Print),
-        C::ExportBookPdf => book_entry::run_book_output(&shell, parent, book_entry::BookOutputKind::Pdf),
-        C::ExportBookEpub => book_entry::run_book_output(&shell, parent, book_entry::BookOutputKind::Epub),
-        C::ExportBookLaTeX => book_entry::run_book_output(&shell, parent, book_entry::BookOutputKind::LaTeX),
+        C::CloseBook => book::close_book(&shell),
+        C::PrintBook => book::run_book_output(&shell, parent, BookOutputKind::Print),
+        C::ExportBookPdf => book::run_book_output(&shell, parent, BookOutputKind::Pdf),
+        C::ExportBookEpub => book::run_book_output(&shell, parent, BookOutputKind::Epub),
+        C::ExportBookLaTeX => book::run_book_output(&shell, parent, BookOutputKind::LaTeX),
         C::Help | C::PrivacyPolicy => {
             let url = if id == C::Help { strings::help::SUPPORT_URL } else { strings::help::PRIVACY_URL };
             let window = parent.map(|p| p.window());
@@ -658,72 +644,6 @@ pub fn run_app_command(id: CommandId, argument: CommandArgument) {
             }
         }
         _ => {}
-    }
-}
-
-/// The Book menu's entry points, under the names and signatures P5's `crate::book` publishes
-/// (`new_book`, `open_book`, `unpack_example_book`, `close_book`, `run_book_output`,
-/// `BookOutputKind`, `BOOK_WINDOW_ID`).
-///
-/// MERGE (P5): delete this module and write `use crate::book as book_entry;` — P5's functions do
-/// the same and more (the Book window comes forward, Close Book closes it, the outputs render in
-/// it). Until then these drive the S0 stub's `BookLibraryHost` directly.
-mod book_entry {
-    use std::rc::Rc;
-
-    use md_logic::exec::{LocalBoxFuture, Spawner};
-    use md_logic::seams::WindowId;
-
-    use crate::app::Shell;
-    use crate::windows::host::WindowHost;
-
-    /// The Book window's id: there is one, and document windows count from 1.
-    pub const BOOK_WINDOW_ID: WindowId = WindowId(0);
-
-    /// The four whole-book outputs (§8.4, Book menu).
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub enum BookOutputKind {
-        Print,
-        Pdf,
-        Epub,
-        LaTeX,
-    }
-
-    /// Runs a library flow over `invoking` (else the Book window) and shows the book it opened.
-    fn flow(
-        shell: &Rc<Shell>,
-        invoking: Option<Rc<dyn WindowHost>>,
-        start: impl FnOnce(&dyn WindowHost) -> LocalBoxFuture<'static, bool>,
-    ) {
-        let parent = invoking.unwrap_or_else(|| shell.windows.show_book_host());
-        let done = start(parent.as_ref());
-        shell.spawner.spawn_local(Box::pin(async move {
-            if done.await {
-                Shell::get().windows.show_book();
-            }
-        }));
-    }
-
-    pub fn new_book(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>) {
-        flow(shell, invoking, |parent| shell.book.new_book(parent));
-    }
-
-    pub fn open_book(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>) {
-        flow(shell, invoking, |parent| shell.book.open_book(parent));
-    }
-
-    pub fn unpack_example_book(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>) {
-        flow(shell, invoking, |parent| shell.book.unpack_example_book(parent));
-    }
-
-    pub fn close_book(shell: &Rc<Shell>) {
-        shell.book.close_book();
-    }
-
-    /// The S0 stub has no book compiler behind it: nothing to render yet.
-    pub fn run_book_output(shell: &Rc<Shell>, invoking: Option<Rc<dyn WindowHost>>, kind: BookOutputKind) {
-        let _ = (shell, invoking);
-        eprintln!("md: {kind:?} of the book arrives with the Book window (P5)");
     }
 }
 

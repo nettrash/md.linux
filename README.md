@@ -165,8 +165,9 @@ every one of them and its licence.
   (Shift+Ctrl+T), **Quote** (Shift+Ctrl+Q), **Indent** / **Outdent**
   (Ctrl+] / Ctrl+[). Each is one Ctrl+Z. Typing `*`, `_`, `` ` `` or `$`
   with a selection wraps it instead of replacing it (**Edit ▸ Typing ▸ Wrap
-  Selection When Typing \* _ ` $**, on by default). The rules are the same
-  on every md app, pinned by one shared set of test vectors
+  Selection When Typing \* _ ` $**, on by default); one Ctrl+Z leaves just
+  the typed character, a second brings the selection back. The rules are
+  the same on every md app, pinned by one shared set of test vectors
   (`docs/formatting.md`).
 - **Print and export.** Print the *rendered* document (**File ▸ Print…**,
   Ctrl+P) through GTK's print dialog. Export it as a PDF at A4 (the
@@ -266,7 +267,7 @@ package and the manual test on a real Ubuntu desktop.
 | `examples/` | The bundled examples and the Example Book. |
 | `packaging/` | The desktop entry, MIME types, AppStream metadata, icons, AppArmor profile, manual page, copyright and control template of the `.deb`. |
 | `docker/`, `scripts/` | The build image, `dev.sh` (build, test, run, self-test) and `package.sh`. |
-| `docs/` | The port plan, the measured Linux facts, the shell design and the packaging. |
+| `docs/` | The port plan, the measured Linux facts, the shell design, the packaging, and the checklist for a real Ubuntu desktop (`docs/desktop-checklist.md`). |
 
 ## License
 

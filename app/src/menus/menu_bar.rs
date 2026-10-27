@@ -26,7 +26,6 @@ use md_logic::text::note_preview;
 
 use crate::app::Shell;
 use crate::menus::actions;
-use crate::windows::document_window::display_folder;
 use crate::windows::host::WindowKind;
 
 /// The eight menu titles with their mnemonics (the spike's spelling, §2.1).
@@ -211,22 +210,10 @@ fn hash(value: &impl std::hash::Hash) -> u64 {
     BuildHasherDefault::<DefaultHasher>::default().hash_one(value)
 }
 
-/// Open Recent's rows: the file name, and its folder after an em dash when two rows share a name
-/// (a `GMenu` row has no tooltip, §6.6).
+/// Open Recent's rows: each entry's name verbatim — `RecentFiles` already appends the folder when
+/// two rows share a file name (a `GMenu` row has no tooltip, §6.6).
 fn recent_rows(snapshot: &ShellSnapshot) -> Vec<(String, glib::Variant)> {
-    let entries = &snapshot.recent_entries;
-    entries
-        .iter()
-        .map(|entry| {
-            let shared = entries.iter().filter(|other| other.name == entry.name).count() > 1;
-            let label = if shared && !entry.folder.is_empty() {
-                format!("{} {} {}", entry.name, md_logic::strings::EM_DASH, display_folder(&entry.folder))
-            } else {
-                entry.name.clone()
-            };
-            (label, entry.token.to_variant())
-        })
-        .collect()
+    snapshot.recent_entries.iter().map(|entry| (entry.name.clone(), entry.token.to_variant())).collect()
 }
 
 /// A dynamic row: `label` on `id`'s action with `target`.

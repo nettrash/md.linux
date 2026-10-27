@@ -7,11 +7,10 @@
 //! renumber plan, the deletion neighbour, the compile), and the disk is read back after every
 //! operation.
 //!
-//! Rows that need another package's real implementation detect it precisely and print
-//! `SKIP books.<row> — waits for <package>` instead of recording a row while it is still the S0
-//! stub: P2's file system (the S0 stub reads nothing, so the article session cannot load), P2's
-//! alerts (the stub answers every prompt with Cancel at once), P1's accelerators and window
-//! manager, P4's export renderer. Once those land the same rows run.
+//! The keystroke and click rows need the input tier; with `--no-input` they print
+//! `SKIP books.<row>` instead of recording a row. The whole-book outputs run through the Book
+//! window's own exports into `OUT/books-out/`, their save dialogs answered through the window's
+//! real pickers (`GtkPickers::queue_answer`), Print Book up to GTK's print dialog.
 
 use std::cell::RefCell;
 use std::fs;
@@ -30,22 +29,21 @@ use md_logic::books::{BookOutputs, BookRowKind, book_sidebar_model};
 use md_logic::commands::{CommandArgument, CommandId};
 use md_logic::documents::Stage;
 use md_logic::exec::{LocalBoxFuture, ready};
-use md_logic::seams::{DocumentRegistry, FileIdentity, FileSystem, WindowId};
+use md_logic::seams::{DocumentRegistry, FileIdentity};
 use md_logic::settings::{SettingsStore, settings_keys};
 use md_logic::strings::{self, books};
 use md_logic::windows::window_title;
 
-use crate::book::BOOK_WINDOW_ID;
 use crate::book::book_window::BookWindow;
+use crate::book::{BOOK_WINDOW_ID, BookOutputKind};
 use crate::selftest::Harness;
 use crate::windows::host::WindowHost;
 
 /// How long a window may take to appear or go.
 const WINDOW_LIMIT: Duration = Duration::from_secs(10);
 
-/// A window id no window manager hands out: the self-test's stand-in for a document window that
-/// owns an article, while P1's window manager is the S0 stub.
-const STAND_IN_OWNER: WindowId = WindowId(990_001);
+/// How long one whole-book export may take (the EPUB waits for every diagram's snapshot).
+const EXPORT_LIMIT: Duration = Duration::from_secs(240);
 
 pub async fn run(h: &Harness) {
     let shell = h.shell();
@@ -105,9 +103,8 @@ pub async fn run(h: &Harness) {
     let order: Vec<String> = book_model::reading_order(&listed).into_iter().map(|a| a.path).collect();
     let navigator = book.navigator();
     let session = book.session();
-    let files_landed = shell.files.directory_exists("/");
-    let editing_title = files_landed.then(|| session.title());
-    let expected_title = window_title::for_book(Some(listed.name()), editing_title.as_deref());
+    let editing_title = session.title();
+    let expected_title = window_title::for_book(Some(listed.name()), Some(&editing_title));
     h.check(
         "book_opens",
         book.pages().0 == "book"
@@ -145,30 +142,15 @@ pub async fn run(h: &Harness) {
     );
 
     // ---- the article ----
-    if files_landed {
-        let text = book_folder::read_article(&first).unwrap_or_default();
-        h.check(
-            "selection_opens_article",
-            session.stage() == Stage::Editing(first.clone()) && session.text() == text && book.pages().1 == "editing",
-            format!("{:?}, {} chars, page {}", session.stage(), session.text().len(), book.pages().1),
-        );
-    } else {
-        skip("selection_opens_article", "P2 (StdFileSystem is the S0 stub, so no article loads)");
-        // What the pane shows for an article it cannot read, which is what the stub makes of it.
-        let (title, message, button) = book.status();
-        h.check(
-            "unreadable_page",
-            matches!(session.stage(), Stage::Unreadable(_))
-                && book.pages().1 == "status"
-                && title == books::UNREADABLE_TITLE
-                && message == books::unreadable_message("Preface")
-                && !button,
-            format!("{:?}, \"{title}\" / \"{message}\"", session.stage()),
-        );
-    }
+    let text = book_folder::read_article(&first).unwrap_or_default();
+    h.check(
+        "selection_opens_article",
+        session.stage() == Stage::Editing(first.clone()) && session.text() == text && book.pages().1 == "editing",
+        format!("{:?}, {} chars, page {}", session.stage(), session.text().len(), book.pages().1),
+    );
     h.screenshot("example-book").await;
 
-    if files_landed {
+    {
         let before = fs::metadata(&first).map(|m| m.ino()).ok();
         let edited = format!("{}\nA line written in the book.\n", session.text());
         session.edit(&edited);
@@ -181,8 +163,6 @@ pub async fn run(h: &Harness) {
             saved && before.is_some() && before == after && !session.has_unsaved_changes(),
             format!("saved {saved}, inode {before:?} → {after:?}"),
         );
-    } else {
-        skip("edit_autosaves_in_place", "P2 (StdFileSystem)");
     }
 
     // ---- stepping ----
@@ -207,8 +187,6 @@ pub async fn run(h: &Harness) {
     let accels = shell.app.accels_for_action("win.next-article");
     if !h.input() {
         skip("alt_down_up", "the input tier (--no-input)");
-    } else if accels.is_empty() {
-        skip("alt_down_up", "P1 (no accelerator on win.next-article yet)");
     } else {
         h.focus(&window).await;
         h.key("alt+Down").await;
@@ -287,7 +265,7 @@ pub async fn run(h: &Harness) {
     if !h.input() {
         skip("rename_prompt", "the input tier (--no-input)");
     } else if !prompt_appears(h, &book, "book.rename", &editor_article).await {
-        skip("rename_prompt", "P2 (AdwAlerts is the S0 stub and answers Cancel)");
+        h.check("rename_prompt", false, "no Rename dialog appeared");
     } else {
         h.key("ctrl+a").await;
         h.type_text("The Writing Desk").await;
@@ -408,7 +386,7 @@ pub async fn run(h: &Harness) {
     h.check("show_sidebar", hidden && shown_again, format!("hidden {hidden}, shown {shown_again}"));
 
     // ---- the view mode: md.bookViewMode, app-wide ----
-    if files_landed {
+    {
         dispatcher.reset_debounce();
         dispatcher.execute(CommandId::ViewPreview, &CommandArgument::None);
         let stored = shell.settings.get_string(settings_keys::BOOK_VIEW_MODE);
@@ -425,25 +403,14 @@ pub async fn run(h: &Harness) {
                 && back.as_deref() == Some("split"),
             format!("{stored:?} / {toggled:?} / {back:?}"),
         );
-    } else {
-        skip("view_mode_stored", "P2 (no article is editable, so View is disabled)");
     }
 
     // ---- Open in New Window: the handoff and the reclaim ----
-    if files_landed {
-        open_in_window(h, &book, &shell).await;
-    } else {
-        skip("handoff_and_reclaim", "P2 (StdFileSystem)");
-        // The mark the document window claims is set even when nothing can be edited here.
-        let target = navigator.selection().unwrap_or_default();
-        activate(&book, sidebar_action(crate::book::sidebar::OPEN_IN_WINDOW), &target);
-        let marked = shell.book.article_opens().borrow_mut().claim_open(&target);
-        h.check("open_in_window_marks", marked, target.clone());
-        window.present();
-    }
+    open_in_window(h, &book, &shell).await;
 
-    // ---- the whole-book outputs: flush, list, compile ----
-    outputs(h, &book, &shell, files_landed).await;
+    // ---- the whole-book outputs: flush, list, compile; then into files ----
+    outputs(h, &book, &shell).await;
+    output_files(h, &book, &shell).await;
 
     // ---- Close Book forgets it; the folder stays; the next open remembers the article ----
     let last = shell.settings.get_string(settings_keys::BOOK_LAST_ARTICLE).unwrap_or_default();
@@ -492,13 +459,6 @@ async fn open_in_window(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::ap
         return;
     };
     let canonical = shell.identity.canonical(&target);
-    let p1_landed = !shell.app.accels_for_action("win.next-article").is_empty();
-    if !p1_landed {
-        // P1's window manager is the S0 stub: a stand-in owner takes the article as the document
-        // window would, so the handoff stays put; letting go of it must give the article back.
-        skip("show_window_presents_owner", "P1 (WindowManager::open_path is the S0 stub)");
-        shell.registry.register(STAND_IN_OWNER, &canonical);
-    }
     activate(book, sidebar_action(crate::book::sidebar::OPEN_IN_WINDOW), &target);
     let owned = h.wait_until(WINDOW_LIMIT, || shell.registry.owning(&canonical).is_some()).await;
     // The document window came forward; the handoff page is the Book window's.
@@ -512,7 +472,7 @@ async fn open_in_window(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::ap
         && button;
     h.screenshot("handoff").await;
     let owner = shell.registry.owning(&canonical);
-    if p1_landed {
+    {
         let presented = match owner.and_then(|id| shell.windows.host(id)) {
             Some(host) => {
                 book.gtk_window().present();
@@ -526,9 +486,6 @@ async fn open_in_window(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::ap
             None => false,
         };
         h.check("show_window_presents_owner", presented, format!("owner {owner:?}"));
-    } else {
-        // `remove`, not `unregister`: the stand-in also got a Window-menu row by registering.
-        shell.registry.remove(STAND_IN_OWNER);
     }
     let reclaimed = h.wait_until(WINDOW_LIMIT, || session.stage() == Stage::Editing(target.clone())).await;
     book.gtk_window().present();
@@ -542,7 +499,7 @@ async fn open_in_window(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::ap
 /// Print Book and Export Book: every output flushes the article through the app's hub, lists the
 /// book afresh and compiles it — checked through a recording sink, against md-core's own compile
 /// of the folder. The render into files is P4's pipeline.
-async fn outputs(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::app::Shell>, files_landed: bool) {
+async fn outputs(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::app::Shell>) {
     let session = book.session();
     let sink = Rc::new(RecordingSink::default());
     let output = shell.book.book_output(sink.clone());
@@ -551,7 +508,7 @@ async fn outputs(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::app::Shel
     output.alert_requested().connect(move |alert: &(String, String)| seen.borrow_mut().push(alert.clone()));
 
     // An edit still waiting for its autosave must reach the compile: the hub flushes first.
-    let pending = files_landed.then(|| {
+    let pending = Some({
         let edited = format!("{}\nWritten just before printing.\n", session.text());
         session.edit(&edited);
         edited
@@ -584,14 +541,74 @@ async fn outputs(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::app::Shel
             structured.as_ref().map_or(0, |b| b.sections.len())
         ),
     );
-    if !files_landed {
-        skip("outputs_flush_pending_edit", "P2 (no article is editable)");
+}
+
+/// Print Book and Export Book ▸ PDF / EPUB / LaTeX exactly as the Book menu runs them
+/// (`book::run_book_output`): the Book window's exports render, its pickers answer the save dialog
+/// (queued here), the files land in `OUT/books-out/`; Print Book reaches GTK's print dialog.
+async fn output_files(h: &Harness, book: &Rc<BookWindow>, shell: &Rc<crate::app::Shell>) {
+    let out = h.out().join("books-out");
+    let _ = fs::remove_dir_all(&out);
+    if let Err(err) = fs::create_dir_all(&out) {
+        h.check("print_and_export_book_files", false, format!("{}: {err}", out.display()));
+        return;
     }
-    if crate::book::outputs_wired(shell) {
-        skip("print_and_export_book_files", "a self-test answer for P4's save dialog (not written yet)");
-    } else {
-        skip("print_and_export_book_files", "P4 (WindowExports::book_outputs is the S0 stub)");
-    }
+    let pickers = book.gtk_pickers();
+    let exports = book.exports();
+    let host: Rc<dyn WindowHost> = Rc::clone(book) as Rc<dyn WindowHost>;
+    let run = |kind: BookOutputKind| crate::book::run_book_output(shell, Some(Rc::clone(&host)), kind);
+    let landed = |path: &Path| {
+        let path = path.to_path_buf();
+        move || fs::metadata(&path).is_ok_and(|m| m.len() > 0)
+    };
+
+    let pdf = out.join("book.pdf");
+    pickers.queue_answer(Some(&pdf.to_string_lossy()));
+    run(BookOutputKind::Pdf);
+    let pdf_done = h.wait_until(EXPORT_LIMIT, landed(&pdf)).await;
+    let (_, pdf_info) = h.run(&["pdfinfo", &pdf.to_string_lossy()]).await;
+    let pages = pdf_info
+        .lines()
+        .find_map(|l| l.strip_prefix("Pages:"))
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or_default();
+
+    let epub = out.join("book.epub");
+    pickers.queue_answer(Some(&epub.to_string_lossy()));
+    run(BookOutputKind::Epub);
+    let epub_done = h.wait_until(EXPORT_LIMIT, landed(&epub)).await;
+    let entries = fs::read(&epub)
+        .ok()
+        .and_then(|bytes| md_core::export::zip_reader::entries(&bytes, None))
+        .map(|entries| entries.into_iter().map(|e| e.name).collect::<Vec<String>>())
+        .unwrap_or_default();
+    let epub_ok = epub_done
+        && entries.first().is_some_and(|name| name == "mimetype")
+        && entries.iter().any(|name| name.ends_with(".opf"));
+
+    let tex = out.join("book.tex");
+    pickers.queue_answer(Some(&tex.to_string_lossy()));
+    run(BookOutputKind::LaTeX);
+    let tex_done = h.wait_until(EXPORT_LIMIT, landed(&tex)).await;
+    let latex = fs::read_to_string(&tex).unwrap_or_default();
+    let tex_ok = tex_done && latex.starts_with("\\documentclass") && latex.contains("\\chapter");
+
+    let known = Harness::toplevels();
+    run(BookOutputKind::Print);
+    let dialog = h.dismiss_print_dialog(known, "print-book-dialog").await;
+    let printed = h.wait_until(Duration::from_secs(10), || !exports.print_outcomes().is_empty()).await;
+    let outcomes = exports.print_outcomes();
+
+    h.check(
+        "print_and_export_book_files",
+        pdf_done && pages >= 3 && epub_ok && tex_ok && dialog.is_some() && printed,
+        format!(
+            "PDF {pdf_done} ({pages} pages); EPUB {epub_done} ({} entries); LaTeX {tex_done} ({} bytes); print dialog \
+             {dialog:?}, outcomes {outcomes:?}",
+            entries.len(),
+            latex.len()
+        ),
+    );
 }
 
 /// What the recording sink saw.

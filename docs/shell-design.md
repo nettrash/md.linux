@@ -264,9 +264,10 @@ selection in Split exactly as before, and the menu rows still show their chords.
 chord on Linux — registering the Delete key would take it from every entry.
 
 **While a dialog is up.** `adw::AlertDialog` is presented inside the window, so window shortcuts
-would still reach the window behind it. `AdwAlerts` sets the snapshot's `dialog_open` (a Linux field,
-§15) and every `win.` action is disabled until the dialog answers — the Mac's sheet blocks the
-window's menu items the same way.
+would still reach the window behind it. The snapshot's `dialog_open` (a Linux field, §15) is true
+while the window has a visible dialog (an alert, About), `AdwAlerts` is showing one or `GtkPickers`
+has a file dialog up (their `open_changed` events republish the snapshot), and every `win.` action
+is disabled until it answers — the Mac's sheet blocks the window's menu items the same way.
 
 **Escape** is not an accelerator (it would take Escape from input methods and popovers). A window
 `gtk::EventControllerKey` in the **bubble** phase exits Zen when nothing below handled the key; the
@@ -481,14 +482,26 @@ them exactly what md.win's `EditorPane` feeds them, taken at GTK's natural bound
 | **Settings** | `use_settings(store)`; `SettingsStore::changed` | `hooks.configure(TypingSettings::read(store))`, wrap = `wrap_selection_setting::read(store)`; live in every window |
 
 Why boundaries and not per-signal hooks: GTK's typing over a selection is *two* buffer edits
-(`delete_selection` then `insert_interactive_at_cursor`) inside one user action, and the retype rule
-("a lowercase letter typed over its own capital stays lowercase") and the wrap both need them as one
-replacement — exactly what md.win's `BeforeTextChanging` sees. Reading the text twice per keystroke
-is md.win's cost too (`TextBox.Text`).
+(`delete_selection` then `insert_interactive_at_cursor`), and the retype rule ("a lowercase letter
+typed over its own capital stays lowercase") and the wrap both need them as one replacement —
+exactly what md.win's `BeforeTextChanging` sees. Reading the text twice per keystroke is md.win's
+cost too (`TextBox.Text`).
 
-**Undo units** (smart-typing.md §3.5, formatting.md §4): the typed letter is GTK's typing step; the
-capital (or the wrap) is a separate group of a delete and an insert, so one Ctrl+Z restores `m` from
-`M` (or `*` from `*word*`), a second removes it. That GtkTextHistory never merges the group into the
+**The bridge.** Over a selection longer than one scalar GTK 4.22 even puts the two edits in *two*
+user actions (`gtk_text_view_commit_text`: "so that there are two undo operations"), which would
+make the typed replacement two undo steps where the Mac and md.win have one — undoing a wrap would
+take three Ctrl+Z instead of two. So a user action that removed exactly its selection is held, and
+the pane begins an outermost user action of its own **inside** that action's `end-user-action`
+handler — before `GtkTextBuffer` hands the end to GtkTextHistory, whose group therefore stays open.
+GTK's insertion lands in it as an inner action; the next `Priority::HIGH` idle (before any further
+input) ends it. One history group, one undo step, one replacement for the hooks; a deletion nothing
+follows (Delete or Cut over a selection) closes the same way on its own. The self-test's wrap row
+proves Ctrl+Z ×2 back to the selected word and Shift+Ctrl+Z ×2 forward again.
+
+**Undo units** (smart-typing.md §3.5, formatting.md §4): the typed letter is GTK's typing step (a
+typed replacement of a selection one step, through the bridge above); the capital (or the wrap) is
+a separate group of a delete and an insert, so one Ctrl+Z restores `m` from `M` (or `*` from
+`*word*`), a second removes it (or brings `word` back, selected). That GtkTextHistory never merges the group into the
 preceding typing run is asserted by the self-test's keystroke tier (§13.3), not assumed.
 
 **External text** (open, Revert, Reload from Disk, an example, an article switch):
@@ -1025,7 +1038,10 @@ document carries no images.
 
 `services::AdwAlerts` (`seams::Alerts`) over `adw::AlertDialog::new(Some(title), Some(message))`,
 `add_response`, `set_response_appearance(.., ResponseAppearance::Destructive | Suggested)`,
-`set_default_response`, `set_close_response`, `choose_future(Some(&window))`; name prompts put a
+`set_default_response`, `set_close_response`, then `present(Some(&window))` and the `response` /
+`closed` signals — **never `choose_future`**: libadwaita-rs 0.9's trampoline asserts that
+`choose_finish` returned a string, a cancelled choice returns NULL, so dropping the future aborts
+the whole process; a caller that stops waiting closes the dialog instead. Name prompts put a
 `gtk::Entry` in `set_extra_child` (activates the default response). One at a time per window (a
 queue), and `dialog_open` in the snapshot while one is up (§2.2). Titles verbatim from
 `strings::exports` / `documents` / `books`.
@@ -1152,6 +1168,7 @@ since the epoch; §6.6 — to be added to md-logic, §15).
 | `session.json` | `$XDG_STATE_HOME/md/session.json` | XDG STATE: layout and open files reused on restart (§1.6) |
 | drafts | `$XDG_DATA_HOME/md/drafts/*.md` (`0700` / `0600`) | user text, not cache (§1.6) |
 | recent documents | `~/.local/share/recently-used.xbel` (GTK, shared) | the desktop's own list (§6.6) |
+| the file chooser's own preferences | `~/.config/dconf/user` (the desktop's settings database, shared) | written by GTK's file chooser (GSettings `org.gtk.gtk4.Settings.FileChooser`: size, sort order, hidden files…) whenever md shows it — never by md's code, never a file name; the `privacy` self-test proves it holds only that schema's keys |
 | PDF temp files | `$XDG_RUNTIME_DIR/md/` (deleted after use) | tmpfs, per user |
 | web data | nowhere — ephemeral `NetworkSession` | §4.1 |
 | per-document encoding, newline, scroll | memory only | as md.win |
@@ -1270,7 +1287,7 @@ owned by the work package it checks (docs/shell-work-packages.md).
 | `preview` | engines render offline (KaTeX `.katex` ≥ 1, `\ce{}` with 0 `.katex-error`, hljs, Mermaid, Graphviz, PlantUML SVGs, `plot` 1 svg / 2 polylines / no plot script) **under the CSP**; `javascript:` and `onclick` links do nothing; `other.md` cancelled; `#slug` scrolls; 350 ms debounce = one reload; scroll kept; dark switch re-renders with `data-md-dark`; scroll sync both ways; a killed web process (`terminate_web_process`) reloads once, twice → the notice |
 | `exports` | PDF A4 595 × 842 pt and 6 × 9 in 432 × 648 pt, three `\newpage` sections → three pages; HTML stands alone (opened from `file://` in a fresh renderer: `.katex` present, `compatMode` CSS1Compat); EPUB snapshot count == markup count, PNGs valid, 2× within ±1 px, also at `GDK_SCALE=2`; a 40-page document's last formula snapshots (visible-region path); SVG for each diagram kind; LaTeX; TextBundle with an image beside; the cover from a file beside; exported HTML/EPUB never contain `md-linux-fonts` |
 | `books` | no-book status page; open the Example Book; sidebar rows in order; select → editor; rename / move up / delete through the context actions; Alt+Down / Alt+Up step; Open in New Window → hand-off stage, Show Window; Print Book renders; Export Book PDF / EPUB / LaTeX |
-| `privacy` | after all groups: the files under `OUT/home` are only `settings.conf`, `session.json`, the drafts and `recently-used.xbel` — nothing under `.cache/md` or `.local/share/md/webkitgtk` |
+| `privacy` | after all groups: the files under `OUT/home` are only `settings.conf`, `session.json`, the drafts and `recently-used.xbel` — nothing under `.cache/md` or `.local/share/md/webkitgtk`; beside them only system caches under `.cache/` (Mesa's shader cache) and `.config/dconf/user` holding nothing but GTK's file-chooser keys (§9.2) |
 
 `--no-input` skips the keystroke rows (they need focus on the Xvfb display); CI and agents run them —
 Xvfb with no window manager gives md the focus.

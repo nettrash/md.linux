@@ -20,7 +20,6 @@
 //! really gone is still reported gone, 250 ms later; one that came back is a change, so a clean
 //! document follows the new bytes instead of turning dirty and then conflicted. Events are hints
 //! either way: the session's (mtime, size) stamp check before every write is the guard.
-#![allow(dead_code)] // S0 stub: removed at the integration gate (P1) — this file's callers are P1's and P5's stubs until then
 
 use std::time::Duration;
 

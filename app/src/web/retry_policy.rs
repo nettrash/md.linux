@@ -11,9 +11,6 @@
 //! The count belongs to the preview host, which lives as long as its window or book pane: the
 //! hidden pane of Edit mode keeps its `WebView` in the tree (shell-design §5.2), so a mode switch is
 //! not a new pane and needs none of the Mac's `PreviewRecovery` hand-over.
-// P4 → P1 / P5: until the windows construct previews and exports, only the self-test reaches this;
-// removed at the integration gate.
-#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 /// How many terminations in a row the preview absorbs before it stops. The second one is the last:
 /// it is the one that shows the notice.

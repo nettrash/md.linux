@@ -15,7 +15,7 @@
 //! | `md-footer` | the footer bar (11 pt tabular, ink 60 %, paper-secondary) | P3 |
 //! | `md-bar` | the conflict / save-error bar (paper-secondary) | P3 |
 //! | `md-zen-capsule`, `md-zen-active` | the Zen capsule (80 % paper-secondary) and its active switch | P3 |
-//! | `md-sidebar-row`, `md-chapter-header`, `md-new-article` | Book sidebar rows (13 / 13 / 12 pt) | P5 |
+//! | `md-sidebar-row`, `md-chapter-header`, `md-new-article` | Book sidebar rows (13 / 13 / 12 pt; regular weight inside a button, which Adwaita sets bold) | P5 |
 //! | `md-status-title`, `md-status-message` | Book status pages' text (17 / 12 pt) | P5 |
 
 use std::cell::RefCell;
@@ -171,6 +171,9 @@ textview.md-editor text selection {{
   font-family: {TYPEWRITER};
   font-size: 12pt;
 }}
+button .md-sidebar-row, button .md-new-article {{
+  font-weight: normal;
+}}
 .md-status-title {{
   font-family: {TYPEWRITER};
   font-size: 17pt;
@@ -239,5 +242,7 @@ mod tests {
         }
         assert_eq!(css.matches('{').count(), css.matches('}').count());
         assert!(css.contains("font-family: \"Nimbus Mono PS\", \"Liberation Mono\", monospace;"));
+        // Adwaita sets button labels bold; the sidebar's New Chapter… / New Article… are rows.
+        assert!(css.contains("button .md-sidebar-row, button .md-new-article {\n  font-weight: normal;\n}"));
     }
 }

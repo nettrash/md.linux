@@ -12,12 +12,16 @@
 //!
 //! **GTK splits typing over a selection.** `gtk_text_view_commit_text` (GTK 4.22) ends the user
 //! action after deleting a selection longer than one character and begins a second one for the
-//! insertion — "so that there are two undo operations". md-logic's contract wants the pair as
-//! *one* replacement (that is what the retype rule and the typed wrap are judged on), so a user
-//! action that removed exactly the selection it began with is **held**, not judged: the insertion's
-//! action, which GTK begins synchronously, adopts the held snapshot as its own, and the two reach
-//! `before_text_changing` as one replacement. A deletion nothing follows (Delete, Cut, Backspace
-//! over a selection) is judged when the pane flushes it on the next high-priority idle.
+//! insertion — "so that there are two undo operations". The Mac and md.win make the replacement
+//! *one* undo step, and md-logic's contract wants it as one replacement (that is what the retype
+//! rule and the typed wrap are judged on). So a user action that removed exactly the selection it
+//! began with is **held**, not judged, and the pane *bridges* it: still inside `end-user-action` —
+//! before GtkTextHistory closes the action's group — it begins an outermost user action of its
+//! own, which adopts the held snapshot ([`UserActionTracker::begin`]) and keeps the history group
+//! open. GTK's insertion then lands in it as an inner action, and the pane ends the bridge on the
+//! next high-priority idle: one group, one undo step, one replacement for the hooks. A deletion
+//! nothing follows (Delete, Cut, Backspace over a selection) ends the same way, alone; an adopted
+//! action is never held twice.
 //!
 //! **Deletion side.** A collapsed caret and the first `delete-range` inside the action tell which
 //! side a key removed — the range ending at the caret is Backspace, starting there is Delete —
@@ -73,8 +77,8 @@ pub enum Ended {
     Nothing,
     /// The pane's own edit ended: report the text (the session must see it), judge nothing.
     OwnEdit,
-    /// The first half of GTK's typing over a selection: hold it; flush it on the next idle unless
-    /// the insertion adopts it first.
+    /// The first half of GTK's typing over a selection: the pane begins its bridge now, which
+    /// adopts it.
     Held,
     /// One change to judge: `before` against the buffer as it stands now.
     Judge { before: Snapshot, direction: DeleteDirection },
@@ -88,6 +92,8 @@ pub struct UserActionTracker {
     history: bool,
     base: Option<Snapshot>,
     held: Option<Snapshot>,
+    /// The outermost action open now adopted a held snapshot: whatever it ends with is judged.
+    adopted: bool,
     direction: DeleteDirection,
     saw_delete: bool,
 }
@@ -131,7 +137,7 @@ impl UserActionTracker {
 
     /// `begin-user-action`: the outermost one takes the snapshot (`take` is called only then, and
     /// only when the change will be judged) — or adopts a held selection deletion, which makes
-    /// this action the second half of one replacement.
+    /// this action (the pane's bridge) the whole replacement.
     pub fn begin(&mut self, take: impl FnOnce() -> Snapshot) {
         self.depth += 1;
         if self.depth > 1 {
@@ -143,6 +149,7 @@ impl UserActionTracker {
             self.base = None;
             return;
         }
+        self.adopted = self.held.is_some();
         self.base = Some(match self.held.take() {
             Some(held) => held,
             None => take(),
@@ -179,18 +186,13 @@ impl UserActionTracker {
         if self.own > 0 {
             return Ended::OwnEdit;
         }
+        let adopted = std::mem::take(&mut self.adopted);
         let Some(before) = self.base.take() else { return Ended::Nothing };
-        if before.lost_exactly_the_selection(text) {
+        if !adopted && before.lost_exactly_the_selection(text) {
             self.held = Some(before);
             return Ended::Held;
         }
         Ended::Judge { before, direction: self.direction }
-    }
-
-    /// The idle after a [`Ended::Held`]: the deletion stood alone. The snapshot to judge it
-    /// against, or `None` when an insertion already adopted it.
-    pub fn flush(&mut self) -> Option<Snapshot> {
-        self.held.take()
     }
 
     /// A buffer `changed` outside any user action and not ours: the session must still see it.
@@ -312,22 +314,30 @@ mod tests {
         t.deleted(2, 6);
         assert_eq!(t.end("a  b"), Ended::Held);
         assert!(t.is_holding());
-        // … and the second, begun at once, inserts.
+        // … the pane's bridge begins at once and adopts it; GTK's insertion is an inner action …
         t.begin(|| unreachable!("the held snapshot is adopted"));
+        assert!(!t.is_holding());
+        t.begin(|| unreachable!("an inner begin never snapshots"));
+        assert_eq!(t.end("a * b"), Ended::Nothing);
+        // … and the bridge's end judges the whole replacement.
         assert_eq!(
             t.end("a * b"),
             Ended::Judge { before: snap("a word b", 2, 6), direction: DeleteDirection::Unknown }
         );
-        assert_eq!(t.flush(), None, "nothing is left to flush");
     }
 
     #[test]
-    fn a_deletion_of_the_selection_alone_is_flushed() {
+    fn a_deletion_of_the_selection_alone_is_judged_when_the_bridge_ends() {
         let mut t = UserActionTracker::new();
         t.begin(|| snap("one two", 4, 7));
         assert_eq!(t.end("one "), Ended::Held);
-        assert_eq!(t.flush(), Some(snap("one two", 4, 7)));
+        t.begin(|| unreachable!("the bridge adopts it"));
+        // Nothing was inserted: still exactly the selection gone, but an adopted action is judged.
+        assert_eq!(t.end("one "), Ended::Judge { before: snap("one two", 4, 7), direction: DeleteDirection::Unknown });
         assert!(!t.is_holding());
+        // The next action is an ordinary one again.
+        t.begin(|| snap("one ", 4, 4));
+        assert!(matches!(t.end("one x"), Ended::Judge { .. }));
     }
 
     #[test]
@@ -335,7 +345,8 @@ mod tests {
         let mut t = UserActionTracker::new();
         t.begin(|| snap("abcd", 1, 3));
         assert!(matches!(t.end("ad"), Ended::Held));
-        t.flush();
+        t.begin(|| unreachable!());
+        assert!(matches!(t.end("ad"), Ended::Judge { .. }));
         // A one-character overwrite is one GTK action already: the text never shows the gap.
         t.begin(|| snap("abcd", 1, 2));
         assert!(matches!(t.end("aXcd"), Ended::Judge { .. }));
