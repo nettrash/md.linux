@@ -115,7 +115,9 @@ Sample files: make `~/mdtest/` with `a.md` (a heading, a list, a table, a `$x^2$
     its own window; drag a `.textbundle` folder → it imports; drag selected text from gedit into
     the editor → the text is inserted, no window opens.
 29. The dock: md's icon (not a generic one) at every zoom; md's windows group under it; the app
-    grid finds it by "markdown".
+    grid finds it by "markdown". Help ▸ About md shows the same icon (the dev image has none
+    installed, so the self-test's screenshot shows GTK's missing-icon picture), "nettrash",
+    1.6.0, and Details lists the five bundled engines.
 
 ## 7. The file chooser (§6.1, PRIVACY)
 
