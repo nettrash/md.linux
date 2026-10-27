@@ -126,10 +126,9 @@ pub fn jump_to_slug(slug: &str) -> String {
 // straight to a file. The self-contained-HTML capture is not here: md-core owns those bytes.
 
 /// md.win's `Md.Core.Export.EpubExport.RichSelector` — math and the three diagram engines, no
-/// plot. md-core's `export::epub_export` is still an unported stub, so the selector is spelled here
-/// once; switch [`rich_elements`] and [`canvas_rasterise`] to md-core's constant when it lands, so
-/// the two can never drift.
-pub const RICH_SELECTOR: &str = ".md-mathi, .md-mathd, .mermaid, .plantuml, .graphviz";
+/// plot. Re-exported from md-core so the DOM query and the EPUB writer's marker scan can never
+/// drift.
+pub const RICH_SELECTOR: &str = md_core::export::epub_export::RICH_SELECTOR;
 
 /// The EPUB snapshotter's measurement, the Mac's one-liner over [`RICH_SELECTOR`]. Per element, in
 /// DOM order: `[left + scrollX, top + scrollY, width, height, isMath ? 1 : 0]` — page coordinates.
