@@ -13,6 +13,7 @@ pub mod preview;
 pub mod seams;
 pub mod settings;
 pub mod strings;
+pub mod testing;
 pub mod text;
 pub mod view;
 pub mod windows;
