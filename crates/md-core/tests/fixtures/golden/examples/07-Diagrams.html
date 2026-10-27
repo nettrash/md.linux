@@ -1,0 +1,75 @@
+<h1 id="diagrams">Diagrams</h1>
+<p>Describe a diagram in text and md draws it. Three engines — Mermaid,<br>
+Graphviz and PlantUML — are bundled with the app and run entirely<br>
+offline: nothing is uploaded, and everything you see here renders the<br>
+same way in the preview, in print, and in an exported PDF.</p>
+<h2 id="mermaid">Mermaid</h2>
+<p>A fenced block tagged <code>mermaid</code> becomes a diagram. A flowchart:</p>
+<pre class="mermaid">flowchart TD
+  A[Idea] --&gt; B{Worth writing down?}
+  B --&gt;|Yes| C[Open md]
+  B --&gt;|No| D[Let it go]
+  C --&gt; E[Share it]</pre>
+<p>A sequence diagram:</p>
+<pre class="mermaid">sequenceDiagram
+  participant Y as You
+  participant M as md
+  Y-&gt;&gt;M: Type Markdown
+  M--&gt;&gt;Y: Rendered preview</pre>
+<p>Mermaid is not only boxes and arrows — it draws charts too:</p>
+<pre class="mermaid">xychart-beta
+  title &quot;Words written&quot;
+  x-axis [Mon, Tue, Wed, Thu, Fri]
+  y-axis &quot;Words&quot; 0 --&gt; 1200
+  bar [420, 980, 610, 1150, 300]</pre>
+<p>The full set available here: <code>flowchart</code>, <code>sequenceDiagram</code>,<br>
+<code>classDiagram</code>, <code>stateDiagram-v2</code>, <code>erDiagram</code>, <code>journey</code>, <code>gantt</code>,<br>
+<code>pie</code>, <code>quadrantChart</code>, <code>requirementDiagram</code>, <code>gitGraph</code>, <code>C4Context</code>,<br>
+<code>mindmap</code>, <code>timeline</code>, <code>kanban</code>, <code>sankey-beta</code>, <code>xychart-beta</code>,<br>
+<code>block-beta</code>, <code>packet-beta</code>, <code>architecture-beta</code>, <code>radar-beta</code> and<br>
+<code>treemap-beta</code>.</p>
+<h2 id="graphviz">Graphviz</h2>
+<p>A block tagged <code>dot</code> (or <code>graphviz</code>, or <code>gv</code>) is laid out by Graphviz —<br>
+the classic tool for graphs that are described, not drawn:</p>
+<div class="graphviz" data-engine="dot">digraph {
+  rankdir=LR;
+  node [shape=box];
+  Draft -&gt; Review -&gt; Published;
+  Review -&gt; Draft [label=&quot;changes&quot;];
+}</div>
+<p>Graphviz has several layout programs, and each one can be named as the<br>
+language of the block — <code>dot</code> (the default, for hierarchies), <code>neato</code>,<br>
+<code>fdp</code>, <code>sfdp</code> (spring models), <code>circo</code> (circular), <code>twopi</code> (radial),<br>
+<code>osage</code> and <code>patchwork</code>. The same graph, laid out by <code>circo</code>:</p>
+<div class="graphviz" data-engine="circo">digraph { a -&gt; b -&gt; c -&gt; d -&gt; a; a -&gt; c }</div>
+<p>Clusters, record shapes and HTML-style labels all work as they do in<br>
+Graphviz itself.</p>
+<h2 id="plantuml">PlantUML</h2>
+<p>A block tagged <code>plantuml</code> (or <code>puml</code>) is rendered by PlantUML — wrap the<br>
+source in <code>@startuml</code> … <code>@enduml</code>:</p>
+<div class="plantuml">@startuml
+Author -&gt; Editor : write chapter
+Editor --&gt; Author : live preview
+Author -&gt; Exporter : share as PDF
+@enduml</div>
+<p>PlantUML is far more than UML. Each of these has its own <code>@start…</code><br>
+opener, and any of them can go in a <code>plantuml</code> block: <code>@startmindmap</code><br>
+and <code>@startwbs</code> (mind maps and work breakdowns), <code>@startgantt</code><br>
+(schedules), <code>@startsalt</code> (interface wireframes), <code>@startjson</code> and<br>
+<code>@startyaml</code> (data structures), <code>@startebnf</code> (grammars), <code>@startregex</code><br>
+(regular expressions as railroad diagrams), <code>@startnwdiag</code> (networks),<br>
+<code>@startchen</code> (entity–relationship), <code>@startditaa</code> (ASCII art turned into<br>
+a drawing), and <code>@startlatex</code> / <code>@startmath</code> (formulas). A work<br>
+breakdown, for instance:</p>
+<div class="plantuml">@startwbs
+* Book
+** Part I
+*** Chapter 1
+*** Chapter 2
+** Part II
+@endwbs</div>
+<h2 id="diagram-files">Diagram files</h2>
+<p>A diagram does not have to live inside a Markdown document. Open a<br>
+<code>.puml</code> file and md renders it as a diagram while you edit the source —<br>
+and a <code>.gv</code> file of Graphviz DOT does the same.</p>
+<p>Because diagrams are plain text, they copy, edit, and version like prose.</p>

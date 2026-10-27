@@ -1,0 +1,21 @@
+<h1 id="code">Code</h1>
+<p>Markdown treats code with respect: nothing inside a code span or block is<br>
+interpreted, so your snippets come out exactly as written.</p>
+<h2 id="inline-code">Inline code</h2>
+<p>Mention a command like <code>git status</code> or a value like <code>nil</code> right inside a<br>
+sentence with backticks.</p>
+<h2 id="fenced-code-blocks">Fenced code blocks</h2>
+<p>Three backticks open a block; a language hint after them names the language,<br>
+and md colours its keywords, comments and strings in the paper palette:</p>
+<pre><code class="language-swift">struct Note {
+    var title: String
+    var body: String = &quot;&quot;
+}</code></pre>
+<p>Tildes work as fences too:</p>
+<pre><code class="language-python">def greet(name):
+    return f&quot;Hello, {name}!&quot;</code></pre>
+<p>And a fence with no language keeps text preformatted, exactly as typed —<br>
+with nothing named to colour by, it stays plain:</p>
+<pre><code>columns   line up
+spaces    are preserved</code></pre>
+<p>Long lines scroll horizontally instead of wrapping, so code keeps its shape.</p>

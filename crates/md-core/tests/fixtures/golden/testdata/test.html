@@ -1,0 +1,195 @@
+<h1 id="testmd--markdown-feature-reference">test.md — Markdown feature reference</h1>
+<p>A single document exercising every Markdown feature the <strong>md</strong> renderer<br>
+supports, plus the common syntax in general. Open it in the app and flip<br>
+between <strong>Edit</strong>, <strong>Split</strong> and <strong>Preview</strong> to eyeball the renderer.</p>
+<p>Sections 9–11 cover the rich content added in <strong>1.1</strong> — LaTeX math, Mermaid<br>
+and PlantUML diagrams. These are typeset from bundled, on-device engines<br>
+(no network) in <strong>Preview</strong> and the Split preview pane; in <strong>Edit</strong> they<br>
+appear as their raw source.</p>
+<p>This first paragraph is plain prose. It wraps across multiple source lines<br>
+but renders as one paragraph, because a paragraph is only broken by a<br>
+blank line. Soft line breaks inside a paragraph are collapsed to spaces.</p>
+<p>A second paragraph follows the blank line above. To force a hard line<br>
+break, end a line with two trailing spaces —  <br>
+this text is on a new line within the same paragraph.</p>
+<hr>
+<h2 id="1-headings">1. Headings</h2>
+<h1 id="heading-level-1-atx">Heading level 1 (ATX)</h1>
+<h2 id="heading-level-2">Heading level 2</h2>
+<h3 id="heading-level-3">Heading level 3</h3>
+<h4 id="heading-level-4">Heading level 4</h4>
+<h5 id="heading-level-5">Heading level 5</h5>
+<h6 id="heading-level-6">Heading level 6</h6>
+<h3 id="a-heading-with-code-italics-and-bold-inline">A heading with <code>code</code>, <em>italics</em> and <strong>bold</strong> inline</h3>
+<p>C# and F# headings (the <code>#</code> is part of the text, not a 7th level)</p>
+<h1 id="setext-heading-level-1">Setext heading level 1</h1>
+<h2 id="setext-heading-level-2">Setext heading level 2</h2>
+<hr>
+<h2 id="2-inline-formatting">2. Inline formatting</h2>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span><strong>Bold</strong> with double asterisks and <strong>double underscores</strong></span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span><em>Italic</em> with single asterisks and <em>single underscores</em></span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span><em><strong>Bold and italic together</strong></em></span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span><code>inline code</code> with backticks</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span><del>Strikethrough</del> text</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>A <a href="https://nettrash.me">link to nettrash.me</a></span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>A <a href="https://nettrash.me" title="Hover title">link with a title</a></span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>An autolink: &lt;https://nettrash.me&gt;</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>An email autolink: &lt;nettrash@nettrash.me&gt;</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Escaped characters: \<em>not italic\</em>, \<code>not code\</code>, \# not a heading</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Mixed: <strong>bold with <code>code</code> and <em>italic</em> inside</strong></span></div></div>
+<hr>
+<h2 id="3-blockquotes">3. Blockquotes</h2>
+<blockquote>
+<p>A simple block quote.</p>
+<p>Spanning multiple paragraphs within the same quote.</p>
+</blockquote>
+<blockquote>
+<p>Quotes can contain other elements:</p>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>a list item</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>another item</span></div></div>
+<pre><code>and even a code block</code></pre>
+</blockquote>
+<blockquote>
+<p>Level one</p>
+<blockquote>
+<p>Level two (nested)</p>
+<blockquote>
+<p>Level three (nested deeper)</p>
+</blockquote>
+</blockquote>
+</blockquote>
+<hr>
+<h2 id="4-lists">4. Lists</h2>
+<h3 id="unordered">Unordered</h3>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>First item</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Second item</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Third item with a longer line of text that wraps onto more than one visual line to check continuation alignment</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Asterisk bullets work too</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Plus bullets work too</span></div></div>
+<h3 id="ordered">Ordered</h3>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">1.</span><span>First</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">2.</span><span>Second</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">3.</span><span>Third</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">4.</span><span>Numbers need not be sequential in source</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">1.</span><span>(this renders as item 5)</span></div></div>
+<h3 id="nested-mixed">Nested (mixed)</h3>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">1.</span><span>Top level ordered</span></div><div class="md-item" style="padding-left:1.60em"><span class="md-marker">&bull;</span><span>Nested unordered</span></div><div class="md-item" style="padding-left:1.60em"><span class="md-marker">&bull;</span><span>Another nested item</span></div><div class="md-item" style="padding-left:3.20em"><span class="md-marker">1.</span><span>Deeper ordered</span></div><div class="md-item" style="padding-left:3.20em"><span class="md-marker">2.</span><span>Deeper ordered two</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">2.</span><span>Back to top level</span></div><div class="md-item" style="padding-left:1.60em"><span class="md-marker">&bull;</span><span>With a nested bullet</span></div></div>
+<h3 id="task-lists">Task lists</h3>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&#9744;</span><span>Unchecked task</span></div><div class="md-item done" style="padding-left:0.00em"><span class="md-marker">&#9745;</span><span>Checked task</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&#9744;</span><span>Task with <strong>bold</strong> and <code>code</code></span></div><div class="md-item done" style="padding-left:1.60em"><span class="md-marker">&#9745;</span><span>Nested completed subtask</span></div><div class="md-item" style="padding-left:1.60em"><span class="md-marker">&#9744;</span><span>Nested pending subtask</span></div></div>
+<hr>
+<h2 id="5-code">5. Code</h2>
+<p>Inline <code>let x = 42</code> in a sentence.</p>
+<p>A fenced code block with a language hint (triple backticks):</p>
+<pre><code class="language-swift">struct MarkdownDocument: FileDocument {
+    var text: String
+    static var readableContentTypes: [UTType] { [.markdown, .plainText] }
+}</code></pre>
+<p>A fenced code block using tildes:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;md&quot;,
+  &quot;platforms&quot;: [&quot;Windows&quot;],
+  &quot;dependencies&quot;: []
+}</code></pre>
+<p>A fenced block with no language:</p>
+<pre><code>plain preformatted text
+    indentation is preserved
+1 + 1 = 2</code></pre>
+<p>A code block with a very long line to check horizontal scrolling: <code>the quick brown fox jumps over the lazy dog and keeps on running far past the right edge of the page</code>:</p>
+<pre><code>this_is_a_single_unbroken_line_that_should_scroll_horizontally_rather_than_wrap_in_the_rendered_code_block_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></pre>
+<hr>
+<h2 id="6-tables">6. Tables</h2>
+<p>A GitHub-style table with default alignment:</p>
+<table><thead><tr><th style="text-align:left">Feature</th><th style="text-align:left">Supported</th><th style="text-align:left">Notes</th></tr></thead><tbody><tr><td style="text-align:left">Headings</td><td style="text-align:left">Yes</td><td style="text-align:left">ATX and setext</td></tr><tr><td style="text-align:left">Tables</td><td style="text-align:left">Yes</td><td style="text-align:left">With column alignment</td></tr><tr><td style="text-align:left">Footnotes</td><td style="text-align:left">Maybe</td><td style="text-align:left">Depends on the renderer</td></tr></tbody></table>
+<p>Column alignment (left, center, right):</p>
+<table><thead><tr><th style="text-align:left">Left aligned</th><th style="text-align:center">Center aligned</th><th style="text-align:right">Right aligned</th></tr></thead><tbody><tr><td style="text-align:left">a</td><td style="text-align:center">b</td><td style="text-align:right">c</td></tr><tr><td style="text-align:left">longer text</td><td style="text-align:center">centered</td><td style="text-align:right">1,000,000</td></tr><tr><td style="text-align:left">x</td><td style="text-align:center">y</td><td style="text-align:right">z</td></tr></tbody></table>
+<p>A table with inline formatting in cells:</p>
+<table><thead><tr><th style="text-align:left">Syntax</th><th style="text-align:left">Renders as</th></tr></thead><tbody><tr><td style="text-align:left"><code>**bold**</code></td><td style="text-align:left"><strong>bold</strong></td></tr><tr><td style="text-align:left"><code>*italic*</code></td><td style="text-align:left"><em>italic</em></td></tr><tr><td style="text-align:left"><code>~~strike~~</code></td><td style="text-align:left"><del>strike</del></td></tr><tr><td style="text-align:left"><code>[link](/)</code></td><td style="text-align:left"><a href="https://nettrash.me">link</a></td></tr></tbody></table>
+<hr>
+<h2 id="7-thematic-breaks">7. Thematic breaks</h2>
+<p>Three or more of <code>-</code>, <code>*</code> or <code>_</code> on their own line:</p>
+<hr>
+<hr>
+<hr>
+<hr>
+<h2 id="8-images">8. Images</h2>
+<p>Inline image (may not render if the renderer is text-only):</p>
+<p><img src="https://nettrash.me/favicon-192x192.png" alt="Alt text for an image" title="Optional title"></p>
+<p>A linked image:</p>
+<p><a href="https://nettrash.me"><img src="https://nettrash.me/md-icon.png" alt="Alt text"></a></p>
+<hr>
+<h2 id="9-math-latex">9. Math (LaTeX)</h2>
+<p>New in <strong>1.1</strong>: TeX / LaTeX math is typeset by a bundled <strong>KaTeX</strong> engine,<br>
+entirely on-device with no network. It renders in <strong>Preview</strong> and the Split<br>
+preview pane; <strong>Edit</strong> shows the raw source.</p>
+<p>Inline math sits in the run of text between single dollars: the Pythagorean<br>
+theorem <span class="md-mathi">a^2 + b^2 = c^2</span> relates the sides of a right triangle, and the<br>
+mass–energy relation is <span class="md-mathi">E = mc^2</span>.</p>
+<p>Characters that are Markdown syntax stay literal inside math — the asterisks<br>
+in <span class="md-mathi">a*b*c</span> are a product, not <em>emphasis</em>, and the underscores in <span class="md-mathi">x_1 + x_2</span><br>
+are subscripts. The parenthesis form works too: Euler's identity is<br>
+<span class="md-mathi">e^{i\pi} + 1 = 0</span>.</p>
+<p>The currency guard keeps prose intact: it costs $5 and $10 today, and $99.99<br>
+is a price — none of these become formulas. Inside a code span it stays<br>
+literal as well, so <code>$x$</code> is code, not math.</p>
+<p>Display math is centred on its own line with double dollars:</p>
+<p><span class="md-mathd">\int_0^1 x^2\,dx = \frac{1}{3}</span></p>
+<p>…or with bracket delimiters:</p>
+<p><span class="md-mathd"> \sum_{k=1}^{n} k = \frac{n(n+1)}{2} </span></p>
+<p>A whole fenced block tagged <code>math</code> (or <code>latex</code> / <code>tex</code>) is a display formula —<br>
+handy for multi-line environments:</p>
+<div class="md-mathd">\begin{aligned}
+  (a + b)^2 &amp;= a^2 + 2ab + b^2 \\
+  (a - b)^2 &amp;= a^2 - 2ab + b^2
+\end{aligned}</div>
+<hr>
+<h2 id="10-mermaid-diagrams">10. Mermaid diagrams</h2>
+<p>Also new in <strong>1.1</strong>: a <code> </code>`<code>mermaid </code> fenced block is drawn as a diagram by the<br>
+bundled <strong>Mermaid</strong> engine (Preview / Split, on-device).</p>
+<p>A flowchart with a decision:</p>
+<pre class="mermaid">flowchart TD
+  A[Open a .md file] --&gt; B{Rich content?}
+  B --&gt;|Yes| C[Load KaTeX / Mermaid / PlantUML]
+  B --&gt;|No| D[Stay lightweight]
+  C --&gt; E[Render in Preview]
+  D --&gt; E</pre>
+<p>A sequence diagram:</p>
+<pre class="mermaid">sequenceDiagram
+  participant U as You
+  participant M as md
+  U-&gt;&gt;M: Type Markdown
+  M--&gt;&gt;U: Live rendered preview</pre>
+<p>A pie chart:</p>
+<pre class="mermaid">pie title Where md runs
+  &quot;iOS / iPadOS&quot; : 40
+  &quot;macOS&quot; : 30
+  &quot;Android&quot; : 30</pre>
+<hr>
+<h2 id="11-plantuml-diagrams">11. PlantUML diagrams</h2>
+<p>Also new in <strong>1.1</strong>: a <code> </code>`<code>plantuml </code> block (the aliases <code> </code>`<code>puml </code> and<br>
+<code> </code>`<code>plant-uml </code> work too) is rendered on-device by the bundled <strong>PlantUML</strong><br>
+engine. Wrap the source in <code>@startuml</code> … <code>@enduml</code>.</p>
+<p>A sequence diagram:</p>
+<div class="plantuml">@startuml
+Alice -&gt; Bob: Authentication Request
+Bob --&gt; Alice: Authentication Response
+@enduml</div>
+<p>A class diagram:</p>
+<div class="plantuml">@startuml
+class Document {
+  +text: String
+  +save()
+}
+class Editor
+Editor --&gt; Document : edits
+@enduml</div>
+<p>The short alias behaves identically:</p>
+<div class="plantuml">@startuml
+Bob -&gt; Alice : hello
+@enduml</div>
+<hr>
+<h2 id="12-edge-cases--mixed-content">12. Edge cases &amp; mixed content</h2>
+<p>A paragraph immediately followed by a list (no blank line between, which<br>
+some parsers treat as a lazy continuation):</p>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>item one</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>item two</span></div></div>
+<p>A list item containing a fenced code block:</p>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">1.</span><span>Run the build:</span></div></div>
+<pre><code class="language-powershell">dotnet build src\Md.App\Md.App.csproj `
+  -p:Platform=x64</code></pre>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">2.</span><span>Open a <code>.md</code> file and start editing.</span></div></div>
+<p>A blockquote that contains a table:</p>
+<blockquote>
+<table><thead><tr><th style="text-align:left">Key</th><th style="text-align:left">Value</th></tr></thead><tbody><tr><td style="text-align:left">a</td><td style="text-align:left">1</td></tr><tr><td style="text-align:left">b</td><td style="text-align:left">2</td></tr></tbody></table>
+</blockquote>
+<p>Inline math flows through table cells and list items too (the inline pass<br>
+runs there as well):</p>
+<table><thead><tr><th style="text-align:left">Symbol</th><th style="text-align:left">Meaning</th></tr></thead><tbody><tr><td style="text-align:left"><span class="md-mathi">\pi</span></td><td style="text-align:left">ratio of circumference to diameter</td></tr><tr><td style="text-align:left"><span class="md-mathi">\tau</span></td><td style="text-align:left"><span class="md-mathi">2\pi</span></td></tr></tbody></table>
+<div class="md-list"><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>The golden ratio <span class="md-mathi">\varphi = \frac{1 + \sqrt5}{2}</span>.</span></div><div class="md-item" style="padding-left:0.00em"><span class="md-marker">&bull;</span><span>Euler's number <span class="md-mathi">e \approx 2.718</span>.</span></div></div>
+<p>And a formula inside a blockquote:</p>
+<blockquote>
+<p>A right triangle satisfies <span class="md-mathi">a^2 + b^2 = c^2</span>.</p>
+</blockquote>
+<p>Unicode and emoji: café, naïve, Москва, 日本語, 😀 📝 ✅.</p>
+<p>The end. If everything above renders sensibly in <strong>Preview</strong> — prose,<br>
+tables, code, and the <strong>1.1</strong> formulas and diagrams alike — the parser,<br>
+renderer and the bundled math / diagram engines are healthy.</p>

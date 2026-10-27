@@ -1,0 +1,101 @@
+/* Force backgrounds to render in print / PDF so the content chrome
+   (code blocks, table headers) survives, rather than being dropped. */
+* { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+:root { color-scheme: light; }
+/* On paper the page keeps its own single color: the paper tint is a
+   screen theme, and a content-height background would end mid-page
+   next to the white A4 margins. */
+html, body { background: #F4EFE2; }
+body {
+    color: #2B2620;
+    font-family: "American Typewriter", "Courier New", serif;
+    font-size: 13pt;
+    line-height: 1.55;
+    margin: 0;
+    padding: 48px 56px;
+    -webkit-text-size-adjust: 100%;
+}
+h1, h2, h3, h4, h5, h6 { font-weight: bold; line-height: 1.25; margin: 1.2em 0 0.5em; }
+h1 { font-size: 2em; }
+h2 { font-size: 1.6em; }
+h3 { font-size: 1.3em; }
+h4 { font-size: 1.1em; }
+h5 { font-size: 1em; }
+h6 { font-size: 0.9em; color: #6B635A; }
+p { margin: 0 0 0.9em; }
+a { color: #9C6B2E; }
+code, pre { font-family: "Courier New", monospace; }
+code { background: #EAE2CF; padding: 0.1em 0.3em; border-radius: 4px; font-size: 0.92em; }
+pre { background: #EAE2CF; padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
+/* In export, code wraps: paper can't scroll a too-wide block, so a
+   long line would otherwise be clipped at the block's edge. */
+
+pre code { background: none; padding: 0; font-size: 0.92em; }
+/* Syntax highlighting (highlight.js). Deliberately NOT a stock hljs
+   theme — github / monokai and the rest are bright rainbows that fight
+   the warm-paper, American-Typewriter look. Instead three quiet tones
+   taken from the page's own palette: language keywords and the
+   structural names in the warm accent, comments in muted italic,
+   strings a softer shade of the ink; numbers and everything else stay
+   plain ink. The code face is still Courier New (inherited from `pre
+   code`). Applied by md-init.js over the live DOM, so it reaches
+   preview, print, PDF and HTML export — not EPUB, which snapshots this
+   HTML before any script runs, so its code blocks stay plain. */
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-literal,
+.hljs-type, .hljs-title, .hljs-section, .hljs-name, .hljs-doctag { color: #9C6B2E; }
+.hljs-comment, .hljs-quote, .hljs-meta { color: #6B635A; font-style: italic; }
+.hljs-string, .hljs-regexp, .hljs-symbol, .hljs-char,
+.hljs-attr, .hljs-attribute, .hljs-addition { color: #4A4034; }
+.hljs-deletion { color: #6B635A; text-decoration: line-through; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+blockquote { margin: 0 0 0.9em; padding-left: 14px; border-left: 4px solid #9C6B2E; color: #6B635A; }
+hr { border: none; border-top: 1px solid rgba(43,38,32,0.16); margin: 1.4em 0; }
+/* The author's `\newpage`: a dashed rule on screen; in export / print
+   it collapses to an invisible marker where a new page starts (the
+   PDF capture splits pages at it, and paginated printing breaks). */
+.md-pagebreak { border-top: 2px dashed rgba(43,38,32,0.16); margin: 1.6em 0; }
+table { border-collapse: collapse; margin: 0 0 0.9em; }
+th, td { border: 1px solid rgba(43,38,32,0.16); padding: 6px 12px; }
+th { background: #EAE2CF; }
+.md-list { margin: 0 0 0.9em; }
+.md-item { display: flex; gap: 0.5em; margin: 0.22em 0; }
+.md-marker { color: #6B635A; min-width: 1.5em; text-align: right; }
+.md-item.done { color: #6B635A; text-decoration: line-through; }
+/* Rich blocks: diagrams and display formulas render as SVG/markup, not
+   code — drop the code-block chrome, centre them, allow horizontal
+   scroll. Inline math (.md-mathi) flows with the text. */
+.mermaid, .plantuml, .graphviz, .plot, .md-mathd {
+    background: none; padding: 6px 0; margin: 0 0 0.9em;
+    overflow-x: auto; text-align: center;
+}
+.mermaid svg, .plantuml svg, .graphviz svg, .plot svg { max-width: 100%; height: auto; }
+/* Graphviz draws in plain black on a transparent ground (md-init.js
+   asks for `bgcolor=transparent`). Recolor it to the page's ink here,
+   in CSS, rather than passing colors to the engine: these are
+   presentation attributes, which any CSS rule outranks, and leaving
+   the engine's own attributes alone keeps the layout metrics — and so
+   the label positions it computed — exactly as Graphviz intended.
+
+   An author's own `fontcolor` / `color` survives: Graphviz writes
+   those out as attributes too, so each rule is scoped to the value the
+   engine emits when nothing was asked for — text with no fill of its
+   own, and explicit black. */
+.graphviz svg text:not([fill]) { fill: #2B2620; }
+.graphviz svg text[fill="black"] { fill: #2B2620; }
+.graphviz svg [stroke="black"] { stroke: #2B2620; }
+.graphviz svg [fill="black"]:not(text) { fill: #2B2620; }
+/* Footnotes. The references are superscript numerals in the running
+   text; the notes themselves sit under a rule at the foot of the
+   document, a size down, with a back-link to where they were cited. */
+.md-fnref a { text-decoration: none; color: #9C6B2E; }
+.md-footnotes { margin-top: 2em; font-size: 0.9em; color: #6B635A; }
+.md-footnotes hr { margin: 0 0 0.8em; }
+.md-footnotes ol { margin: 0; padding-left: 1.6em; }
+.md-footnotes li { margin: 0.35em 0; }
+.md-fnback { text-decoration: none; color: #9C6B2E; }
+/* Images render at their natural size, only capped to the page width;
+   height follows so the aspect ratio never distorts. */
+img { max-width: 100%; height: auto; }
+.md-mathd .katex-display { margin: 0; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }

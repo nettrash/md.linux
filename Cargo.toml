@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/md-core", "crates/md-logic", "app"]
+# The GTK app needs GTK 4, libadwaita and WebKitGTK headers, which only the Linux build
+# machine has; a plain `cargo test` anywhere builds and tests the two libraries.
+default-members = ["crates/md-core", "crates/md-logic"]
+
+[workspace.package]
+version = "1.6.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["nettrash <nettrash@nettrash.me>"]
+license = "MIT"
+repository = "https://github.com/nettrash/md.linux"
+
+[workspace.dependencies]
+md-core = { path = "crates/md-core" }
+md-logic = { path = "crates/md-logic" }
+unicode-segmentation = "1.12"
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+# Ported code keeps the shape of md.win's C# so the two can be read side by side.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

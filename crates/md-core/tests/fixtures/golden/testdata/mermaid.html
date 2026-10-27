@@ -1,0 +1,17 @@
+<h1 id="mermaid">Mermaid</h1>
+<p>A flowchart with a decision:</p>
+<pre class="mermaid">flowchart TD
+  A[Open a .md file] --&gt; B{Rich content?}
+  B --&gt;|Yes| C[Load the engines]
+  B --&gt;|No| D[Stay lightweight]</pre>
+<p>A sequence diagram:</p>
+<pre class="mermaid">sequenceDiagram
+  participant U as You
+  participant M as md
+  U-&gt;&gt;M: Type Markdown
+  M--&gt;&gt;U: Live rendered preview</pre>
+<p>A pie chart:</p>
+<pre class="mermaid">pie title Where md runs
+  &quot;iOS / iPadOS&quot; : 40
+  &quot;macOS&quot; : 30
+  &quot;Android&quot; : 30</pre>

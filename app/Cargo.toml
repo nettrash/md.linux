@@ -1,0 +1,16 @@
+[package]
+name = "md"
+description = "md — a Markdown editor and live previewer for Linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+md-core.workspace = true
+md-logic.workspace = true
+
+[lints]
+workspace = true

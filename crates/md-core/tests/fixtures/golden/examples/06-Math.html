@@ -1,0 +1,30 @@
+<h1 id="math">Math</h1>
+<p>md typesets LaTeX math with a bundled KaTeX engine — entirely on your<br>
+device, no network needed. Formulas render in Preview; Edit shows the source.</p>
+<h2 id="inline-math">Inline math</h2>
+<p>Put a formula between single dollars and it flows with the text: the<br>
+Pythagorean theorem <span class="md-mathi">a^2 + b^2 = c^2</span>, or Euler's identity<br>
+<span class="md-mathi">e^{i\pi} + 1 = 0</span> using the parenthesis form.</p>
+<p>Everyday prices stay prose — it costs $5 today and $10 tomorrow — md only<br>
+typesets real formulas.</p>
+<h2 id="display-math">Display math</h2>
+<p>Double dollars center a formula on its own line:</p>
+<p><span class="md-mathd">\int_0^1 x^2\,dx = \frac{1}{3}</span></p>
+<p>Bracket delimiters do the same:</p>
+<p><span class="md-mathd"> \sum_{k=1}^{n} k = \frac{n(n+1)}{2} </span></p>
+<h2 id="multi-line-math">Multi-line math</h2>
+<p>A fenced block tagged <code>math</code> is perfect for aligned derivations:</p>
+<div class="md-mathd">\begin{aligned}
+  (a + b)^2 &amp;= a^2 + 2ab + b^2 \\
+  (a - b)^2 &amp;= a^2 - 2ab + b^2
+\end{aligned}</div>
+<p>Math flows through tables, lists, and quotes too:</p>
+<blockquote>
+<p>The golden ratio is <span class="md-mathi">\varphi = \frac{1 + \sqrt{5}}{2} \approx 1.618</span>.</p>
+</blockquote>
+<h2 id="chemistry">Chemistry</h2>
+<p>Chemical notation rides on the same engine: wrap a formula in <code>\ce{…}</code> and<br>
+its subscripts, charge states and reaction arrows come out the way a<br>
+textbook sets them —</p>
+<p><span class="md-mathd">\ce{H2SO4 + 2 OH- -&gt; SO4^2- + 2 H2O}</span></p>
+<p>and <code>\pu{…}</code> writes a physical quantity with its units, like <span class="md-mathi">\pu{123 kJ/mol}</span>.</p>
