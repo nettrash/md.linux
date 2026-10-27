@@ -15,9 +15,10 @@
 //!   site's one-folder-per-channel layout (`appstore/`, `msstore/`, `play/`); md.win's `msstore/`
 //!   pages describe the Microsoft Store edition.
 //! - The chords in the book tooltips ([`books::PREVIOUS_ARTICLE_TOOLTIP`],
-//!   [`books::NEXT_ARTICLE_TOOLTIP`], [`books::EMPTY_MESSAGE`]) are md.win's Ctrl+Alt+Up / Down
-//!   (the Mac's ⌃⌘↑ / ⌃⌘↓), spelled as GTK spells modifiers too. Whatever chord the command table
-//!   finally binds, these three strings must name it.
+//!   [`books::NEXT_ARTICLE_TOOLTIP`], [`books::EMPTY_MESSAGE`]) are Alt+Up / Alt+Down, the command
+//!   table's Previous / Next Article, spelled as GTK labels them (`Chord::display_text`). The Mac's
+//!   ⌃⌘↑ / ⌃⌘↓ became Ctrl+Alt+Up / Down on Windows, which GNOME binds to workspace switching; see
+//!   `commands::command_table`. A test pins these three strings to the table's chords.
 
 /// The app's name.
 pub const APP_NAME: &str = "md";
@@ -222,8 +223,8 @@ pub mod books {
     // Article bindings (see the module comment).
     pub const NEW_CHAPTER_TOOLTIP: &str = "Create a new chapter folder in the book";
     pub const VIEW_MODE_TOOLTIP: &str = "Switch between editing, split and preview";
-    pub const PREVIOUS_ARTICLE_TOOLTIP: &str = "The previous article in reading order (Ctrl+Alt+Up)";
-    pub const NEXT_ARTICLE_TOOLTIP: &str = "The next article in reading order (Ctrl+Alt+Down)";
+    pub const PREVIOUS_ARTICLE_TOOLTIP: &str = "The previous article in reading order (Alt+Up)";
+    pub const NEXT_ARTICLE_TOOLTIP: &str = "The next article in reading order (Alt+Down)";
     pub const CONTENTS_TOOLTIP: &str = "Jump to a heading";
     pub const NOTES_TOOLTIP: &str = "Jump to a private author note";
     pub const SHARE_TOOLTIP: &str = "Compile the whole book into a PDF, an EPUB, or print it";
@@ -256,7 +257,8 @@ pub mod books {
     }
 
     pub const EMPTY_TITLE: &str = "Select an Article";
-    pub const EMPTY_MESSAGE: &str = "Choose an article in the sidebar to write here. Ctrl+Alt+Up and Ctrl+Alt+Down move through the book in reading order.";
+    pub const EMPTY_MESSAGE: &str =
+        "Choose an article in the sidebar to write here. Alt+Up and Alt+Down move through the book in reading order.";
 
     /// The delete alert's title when the file system refuses (book.md §6.2; the Mac's own "Could
     /// not delete" + the OS message).
