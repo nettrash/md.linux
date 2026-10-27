@@ -11,11 +11,13 @@
 //! | [`html_export`] | `HtmlExport.cs` |
 //! | [`pdf_export`] | `PdfExport.cs` |
 //! | [`diagram_svg`] | `DiagramSvg.cs` |
+//! | [`latex_export`] | `LaTeXExport.cs` |
 
 pub mod diagram_svg;
 pub mod export_file_names;
 pub mod html_export;
 pub mod inflate;
+pub mod latex_export;
 pub mod pdf_export;
 pub mod text_bundle;
 pub mod zip_reader;
