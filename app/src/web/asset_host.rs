@@ -4,148 +4,151 @@
 //! all resolve unchanged — md.win's `https://md.assets/` design on WebKitGTK.
 //!
 //! Each surface (a document's preview, an export renderer) gets its own host name, which is also
-//! its own origin; the handler looks the page up by host.
+//! its own origin; the handler looks the page up by host. `rich/` is the only directory a page can
+//! reach and `index.html` never touches the disk. The URL shape, the containment rule, the MIME
+//! table and the Content-Security-Policy are md-logic's (`preview::asset_origin`,
+//! `preview::asset_mime`); this file is the WebKit plumbing around them and the one decision they
+//! leave to the handler: what each request is answered with ([`AssetHost::answer`], pure and
+//! unit-tested).
 //!
-//! S0 moved the spike's `assets.rs` here as the starting point (docs/linux-facts.md §3): the probe's
-//! registration switches are gone (secure + CORS is what was measured to work); the CSP header is
-//! sent on `index.html` as the design says.
-#![allow(dead_code, unused_variables)] // S0 stub: removed by P4
+//! The spike's handler (docs/linux-facts.md §3), kept: registered once on the one context, secure +
+//! CORS-enabled, never `local` (which breaks the module scripts); every response
+//! `Cache-Control: no-store`, so `reload()` re-requests `index.html` and picks up the new page; the
+//! CSP on `index.html` only.
+// P4 → P1 / P5: until the windows construct previews and exports, only the self-test reaches this;
+// removed at the integration gate.
+#![cfg_attr(not(feature = "selftest"), allow(dead_code))]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub const SCHEME: &str = "md-asset";
+use md_logic::preview::asset_mime;
+use md_logic::preview::asset_origin::{self, CONTENT_SECURITY_POLICY, INDEX_PATH, RICH_FOLDER_NAME, SCHEME};
 
-/// The Content-Security-Policy on every `index.html` (facts §3): no `'unsafe-inline'` for scripts,
-/// so `javascript:` URLs and inline handlers are blocked by the engine.
-pub const CSP: &str = "default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; \
-     style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:";
-
-/// One answered request, for the self-test.
-#[derive(Debug)]
-pub struct Served {
-    pub path: String,
+/// What one request is answered with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answer {
     pub status: u32,
     pub mime: &'static str,
+    pub body: Vec<u8>,
+    /// Whether the response carries [`CONTENT_SECURITY_POLICY`] (`index.html` only).
+    pub csp: bool,
 }
 
+impl Answer {
+    fn not_found() -> Answer {
+        Answer { status: 404, mime: "text/plain", body: Vec::new(), csp: false }
+    }
+}
+
+/// One answered request, for the self-test.
+#[cfg(feature = "selftest")]
+#[derive(Clone, Debug)]
+pub struct Served {
+    pub uri: String,
+    pub status: u32,
+    pub csp: bool,
+}
+
+/// The pages of every live surface and the engines folder they share.
 pub struct AssetHost {
     rich_dir: PathBuf,
     pages: RefCell<HashMap<String, String>>,
+    #[cfg(feature = "selftest")]
     log: RefCell<Vec<Served>>,
 }
 
 impl AssetHost {
     pub fn new(rich_dir: PathBuf) -> Rc<AssetHost> {
-        Rc::new(AssetHost { rich_dir, pages: RefCell::new(HashMap::new()), log: RefCell::new(Vec::new()) })
+        Rc::new(AssetHost {
+            rich_dir,
+            pages: RefCell::new(HashMap::new()),
+            #[cfg(feature = "selftest")]
+            log: RefCell::new(Vec::new()),
+        })
     }
 
-    pub fn index_url(host: &str) -> String {
-        format!("{SCHEME}://{host}/index.html")
-    }
-
+    /// What `md-asset://<host>/index.html` serves from now on.
     pub fn set_page(&self, host: &str, html: String) {
         self.pages.borrow_mut().insert(host.to_owned(), html);
     }
 
+    /// The page `host` serves, if any.
+    pub fn page(&self, host: &str) -> Option<String> {
+        self.pages.borrow().get(host).cloned()
+    }
+
+    /// The surface is gone: its host serves nothing any more.
+    pub fn remove_page(&self, host: &str) {
+        self.pages.borrow_mut().remove(host);
+    }
+
+    /// Every request answered since the last call, oldest first.
+    #[cfg(feature = "selftest")]
     pub fn take_log(&self) -> Vec<Served> {
         std::mem::take(&mut *self.log.borrow_mut())
     }
 
-    /// Registers the scheme on `ctx` (once per process) as secure and CORS-enabled — never as
-    /// local, which breaks the module scripts (facts §3).
-    pub fn attach(self: &Rc<Self>, ctx: &webkit::WebContext) {
+    /// Registers the scheme on `context` — once per process — as secure and CORS-enabled, never as
+    /// local (facts §3: registrations leak within a process, and `local` breaks module scripts).
+    pub fn attach(self: &Rc<Self>, context: &webkit::WebContext) {
         let host = Rc::clone(self);
-        ctx.register_uri_scheme(SCHEME, move |req| host.serve(req));
-        if let Some(sm) = ctx.security_manager() {
-            sm.register_uri_scheme_as_secure(SCHEME);
-            sm.register_uri_scheme_as_cors_enabled(SCHEME);
+        context.register_uri_scheme(SCHEME, move |request| host.serve(request));
+        if let Some(security) = context.security_manager() {
+            security.register_uri_scheme_as_secure(SCHEME);
+            security.register_uri_scheme_as_cors_enabled(SCHEME);
         }
     }
 
-    /// A file under `rich/`, contained.
-    pub fn read_rich(&self, rel: &str) -> Option<Vec<u8>> {
-        if !is_contained(rel) {
+    /// A file under `rich/` by its path relative to that folder, contained; `None` when it is
+    /// outside, missing or unreadable.
+    pub fn read_rich(&self, relative: &str) -> Option<Vec<u8>> {
+        if !asset_origin::is_contained(relative) {
             return None;
         }
-        std::fs::read(self.rich_dir.join(rel)).ok()
+        std::fs::read(self.rich_dir.join(relative)).ok()
     }
 
-    fn serve(&self, req: &webkit::URISchemeRequest) {
-        let uri = req.uri().map(|u| u.to_string()).unwrap_or_default();
-        let (status, mime, body, is_index) = match split_uri(&uri) {
-            Some((host, path)) => {
-                let (status, mime, body) = self.resolve(host, path);
-                (status, mime, body, path == "index.html")
-            }
-            None => (404, "text/plain", Vec::new(), false),
-        };
-        self.log.borrow_mut().push(Served { path: uri, status, mime });
-        let bytes = glib::Bytes::from_owned(body);
-        let len = bytes.len() as i64;
-        let stream = gio::MemoryInputStream::from_bytes(&bytes);
-        let response = webkit::URISchemeResponse::new(&stream, len);
-        response.set_status(status, Some(if status == 200 { "OK" } else { "Not Found" }));
-        response.set_content_type(mime);
-        let headers = webkit::soup::MessageHeaders::new(webkit::soup::MessageHeadersType::Response);
-        headers.append("Cache-Control", "no-store");
-        if is_index {
-            headers.append("Content-Security-Policy", CSP);
-        }
-        response.set_http_headers(headers);
-        req.finish_with_response(&response);
-    }
-
-    fn resolve(&self, host: &str, path: &str) -> (u32, &'static str, Vec<u8>) {
-        if path == "index.html" {
+    /// The answer to `uri`: a surface's `index.html` from memory with the CSP, a contained `rich/`
+    /// file with md-logic's MIME type, and an empty 404 for everything else.
+    pub fn answer(&self, uri: &str) -> Answer {
+        let Some((host, path)) = asset_origin::split_uri(uri) else { return Answer::not_found() };
+        if path == INDEX_PATH {
             return match self.pages.borrow().get(host) {
-                Some(html) => (200, "text/html", html.clone().into_bytes()),
-                None => (404, "text/plain", Vec::new()),
+                Some(html) => Answer { status: 200, mime: "text/html", body: html.clone().into_bytes(), csp: true },
+                None => Answer::not_found(),
             };
         }
-        let Some(rest) = path.strip_prefix("rich/") else {
-            return (404, "text/plain", Vec::new());
+        let Some(relative) = path.strip_prefix(RICH_FOLDER_NAME).and_then(|rest| rest.strip_prefix('/')) else {
+            return Answer::not_found();
         };
-        match self.read_rich(rest) {
-            Some(bytes) => (200, mime_for(rest), bytes),
-            None => (404, "text/plain", Vec::new()),
+        match self.read_rich(relative) {
+            Some(body) => Answer { status: 200, mime: asset_mime::mime_for(relative), body, csp: false },
+            None => Answer::not_found(),
         }
     }
-}
 
-/// `md-asset://host/a/b?q#f` → (`host`, `a/b`).
-pub fn split_uri(uri: &str) -> Option<(&str, &str)> {
-    let rest = uri.strip_prefix(SCHEME)?.strip_prefix("://")?;
-    let end = rest.find(['?', '#']).unwrap_or(rest.len());
-    let rest = &rest[..end];
-    let slash = rest.find('/')?;
-    Some((&rest[..slash], &rest[slash + 1..]))
-}
+    fn serve(&self, request: &webkit::URISchemeRequest) {
+        let uri = request.uri().map(|u| u.to_string()).unwrap_or_default();
+        let answer = self.answer(&uri);
+        #[cfg(feature = "selftest")]
+        self.log.borrow_mut().push(Served { uri: uri.clone(), status: answer.status, csp: answer.csp });
 
-/// A relative path stays inside `rich/`: no empty, `.` or `..` segment, no backslash, no
-/// percent-escape (none of the engines' files needs one), no NUL.
-pub fn is_contained(rel: &str) -> bool {
-    !rel.is_empty()
-        && !rel.contains(['\\', '%', '\0'])
-        && rel.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
-}
-
-/// The Mac's MIME table (md.win `AssetMime`; md-logic `preview::asset_mime` is the shell's source):
-/// WebKit sniffs nothing for a custom scheme, and a module script with the wrong type is refused.
-pub fn mime_for(path: &str) -> &'static str {
-    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        "js" | "mjs" => "text/javascript",
-        "css" => "text/css",
-        "html" => "text/html",
-        "json" => "application/json",
-        "svg" => "image/svg+xml",
-        "woff2" => "font/woff2",
-        "woff" => "font/woff",
-        "ttf" => "font/ttf",
-        _ => "application/octet-stream",
+        let bytes = glib::Bytes::from_owned(answer.body);
+        let length = bytes.len() as i64;
+        let stream = gio::MemoryInputStream::from_bytes(&bytes);
+        let response = webkit::URISchemeResponse::new(&stream, length);
+        response.set_status(answer.status, Some(if answer.status == 200 { "OK" } else { "Not Found" }));
+        response.set_content_type(answer.mime);
+        let headers = webkit::soup::MessageHeaders::new(webkit::soup::MessageHeadersType::Response);
+        headers.append("Cache-Control", "no-store");
+        if answer.csp {
+            headers.append("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+        }
+        response.set_http_headers(headers);
+        request.finish_with_response(&response);
     }
 }
 
@@ -153,35 +156,85 @@ pub fn mime_for(path: &str) -> &'static str {
 mod tests {
     use super::*;
 
-    #[test]
-    fn split_uri_strips_query_and_fragment() {
-        assert_eq!(split_uri("md-asset://preview-1/index.html#intro"), Some(("preview-1", "index.html")));
-        assert_eq!(split_uri("md-asset://p/rich/fonts/K.woff2?x=1"), Some(("p", "rich/fonts/K.woff2")));
-        assert_eq!(split_uri("https://p/index.html"), None);
-        assert_eq!(split_uri("md-asset://hostonly"), None);
+    /// A throwaway `rich/` with two files, removed when dropped.
+    struct RichDir(PathBuf);
+
+    impl RichDir {
+        fn new(name: &str) -> RichDir {
+            let dir = std::env::temp_dir().join(format!("md-asset-host-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("fonts")).unwrap();
+            std::fs::write(dir.join("md-init.js"), b"export {};").unwrap();
+            std::fs::write(dir.join("fonts/KaTeX_Main-Regular.woff2"), b"wOF2").unwrap();
+            RichDir(dir)
+        }
+    }
+
+    impl Drop for RichDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
-    fn containment_rejects_escapes() {
-        assert!(is_contained("katex.min.js"));
-        assert!(is_contained("fonts/KaTeX_Main-Regular.woff2"));
-        assert!(!is_contained("../Cargo.toml"));
-        assert!(!is_contained("fonts/../../x"));
-        assert!(!is_contained("fonts//x"));
-        assert!(!is_contained("%2e%2e/x"));
-        assert!(!is_contained("a\0b"));
-        assert!(!is_contained(""));
+    fn the_csp_header_is_the_one_the_design_measured() {
+        assert_eq!(
+            CONTENT_SECURITY_POLICY,
+            "default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; \
+             style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:"
+        );
+        assert!(!CONTENT_SECURITY_POLICY.contains("script-src 'self' 'unsafe-inline'"));
     }
 
     #[test]
-    fn mime_table_is_the_macs() {
-        assert_eq!(mime_for("md-init.js"), "text/javascript");
-        assert_eq!(mime_for("x.MJS"), "text/javascript");
-        assert_eq!(mime_for("katex.min.css"), "text/css");
-        assert_eq!(mime_for("fonts/a.woff2"), "font/woff2");
-        assert_eq!(mime_for("fonts/a.woff"), "font/woff");
-        assert_eq!(mime_for("fonts/a.ttf"), "font/ttf");
-        assert_eq!(mime_for("a.svg"), "image/svg+xml");
-        assert_eq!(mime_for("README"), "application/octet-stream");
+    fn each_host_serves_its_own_index_with_the_csp() {
+        let rich = RichDir::new("index");
+        let host = AssetHost::new(rich.0.clone());
+        host.set_page("preview-1", "<p>one</p>".into());
+        host.set_page("export-2", "<p>two</p>".into());
+        let one = host.answer("md-asset://preview-1/index.html");
+        assert_eq!((one.status, one.mime, one.csp), (200, "text/html", true));
+        assert_eq!(one.body, b"<p>one</p>");
+        assert_eq!(host.answer("md-asset://export-2/index.html#slug").body, b"<p>two</p>");
+        assert_eq!(host.answer("md-asset://preview-9/index.html").status, 404);
+        host.remove_page("preview-1");
+        assert_eq!(host.answer("md-asset://preview-1/index.html").status, 404);
+        assert_eq!(host.page("export-2").as_deref(), Some("<p>two</p>"));
+    }
+
+    #[test]
+    fn rich_files_are_served_contained_with_the_macs_types_and_no_csp() {
+        let rich = RichDir::new("rich");
+        let host = AssetHost::new(rich.0.clone());
+        let js = host.answer("md-asset://preview-1/rich/md-init.js");
+        assert_eq!((js.status, js.mime, js.csp), (200, "text/javascript", false));
+        assert_eq!(js.body, b"export {};");
+        let font = host.answer("md-asset://p/rich/fonts/KaTeX_Main-Regular.woff2?v=1");
+        assert_eq!((font.status, font.mime), (200, "font/woff2"));
+        for escape in [
+            "md-asset://p/rich/../Cargo.toml",
+            "md-asset://p/rich/fonts/../../x",
+            "md-asset://p/rich/%2e%2e/x",
+            "md-asset://p/rich//md-init.js",
+            "md-asset://p/rich/",
+            "md-asset://p/richmd-init.js",
+            "md-asset://p/other.md",
+            "md-asset://p/md-init.js",
+            "https://p/rich/md-init.js",
+            "md-asset://hostonly",
+        ] {
+            let answer = host.answer(escape);
+            assert_eq!((answer.status, answer.body.len(), answer.csp), (404, 0, false), "{escape}");
+        }
+        assert_eq!(host.read_rich("md-init.js").as_deref(), Some(&b"export {};"[..]));
+        assert_eq!(host.read_rich("../md-init.js"), None);
+    }
+
+    #[test]
+    fn origin_helpers_are_md_logics() {
+        assert_eq!(asset_origin::index_url("preview-1"), "md-asset://preview-1/index.html");
+        assert_eq!(asset_origin::split_uri("md-asset://preview-1/index.html#intro"), Some(("preview-1", "index.html")));
+        assert_eq!(asset_mime::mime_for("katex.min.css"), "text/css");
+        assert_eq!(asset_mime::mime_for("README"), "application/octet-stream");
     }
 }
