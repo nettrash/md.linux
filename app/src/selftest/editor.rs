@@ -478,7 +478,26 @@ async fn jumps(h: &Harness, rig: &Rig) {
 async fn scroll_sync(h: &Harness, rig: &Rig) {
     let long: String = (0..400).map(|i| format!("Line {i}\n")).collect();
     rig.editor.set_text(&long);
-    h.sleep(Duration::from_millis(300)).await;
+    // GtkTextView lays a long text out in idle chunks, and the adjustment's upper bound grows as it
+    // does: a fraction set before it settles is a fraction of an estimate (under load the full
+    // run measured 0.115 for 0.5). Wait until the height has stopped changing.
+    let adjustment = rig.editor.text_view().vadjustment().expect("a scrollable text view");
+    let mut last = -1.0;
+    let mut steady = 0;
+    for _ in 0..100 {
+        h.next_frame(&rig.window).await;
+        h.sleep(Duration::from_millis(30)).await;
+        let upper = adjustment.upper();
+        if (upper - last).abs() < 0.5 {
+            steady += 1;
+            if steady >= 5 {
+                break;
+            }
+        } else {
+            steady = 0;
+            last = upper;
+        }
+    }
     let reported = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&reported);
     let id = rig.editor.scrolled().connect(move |f| sink.borrow_mut().push(*f));
@@ -487,7 +506,6 @@ async fn scroll_sync(h: &Harness, rig: &Rig) {
     rig.preview.did_scroll().emit(&0.5);
     h.sleep(Duration::from_millis(100)).await;
     let echoed = reported.borrow().len();
-    let adjustment = rig.editor.text_view().vadjustment().expect("a scrollable text view");
     let applied = adjustment.value() / (adjustment.upper() - adjustment.page_size());
     // A scroll of the editor's own is reported as a fraction.
     adjustment.set_value((adjustment.upper() - adjustment.page_size()) * 0.25);
