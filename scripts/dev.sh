@@ -3,33 +3,39 @@
 #
 #   scripts/dev.sh image                 build the image (docker/Dockerfile) as md-linux-dev
 #   scripts/dev.sh build [cargo args]    cargo build -p md (debug unless --release is passed)
-#   scripts/dev.sh test                  fmt --check, clippy -D warnings (workspace + md), cargo test
-#   scripts/dev.sh clippy                clippy -D warnings only
+#   scripts/dev.sh test                  fmt --check; clippy -D warnings on the workspace, on md and
+#                                        on md --features selftest; cargo test (workspace, and md
+#                                        with the self-test's own unit tests)
+#   scripts/dev.sh clippy                the three clippy runs only
 #   scripts/dev.sh fmt                   cargo fmt --all
 #   scripts/dev.sh run [md args]         run md under Xvfb + a D-Bus session; a screenshot of the
-#                                        screen after MD_SHOT_AFTER seconds (default 8) lands in OUT
-#   scripts/dev.sh spike                 the GUI spike: md --spike OUT under Xvfb (screenshots,
-#                                        PDFs and spike-results.json in OUT)
-#   scripts/dev.sh probe [variant…]      md --probe <variant> OUT, one fresh process per variant
-#                                        (default: all six scheme registrations)
+#                                        screen after MD_SHOT_AFTER seconds (default 8): OUT/run.png
+#   scripts/dev.sh selftest [args]       md --selftest OUT/selftest [args] under Xvfb, built with the
+#                                        `selftest` feature, its profile in OUT/selftest/home (wiped
+#                                        first); args: --only group,… and --no-input
+#                                        (docs/shell-design.md §13). Exits with the run's verdict.
+#   scripts/dev.sh package [arch]        the .deb — delegates to scripts/package.sh (on the host)
 #   scripts/dev.sh shell                 an interactive shell in the image
 #
-# OUT is $MD_OUT, default ./dist/spike (gitignored). On the host every subcommand runs inside
-# Docker: the tree is bind-mounted at /src, OUT at /out, the cargo registry and the target
-# directory are named volumes (md-linux-cargo, md-linux-target-<worktree name>) so rebuilds are
-# incremental. On a Linux machine with the -dev packages installed, MD_DEV_NATIVE=1 runs the same
-# subcommands directly.
+# OUT is $MD_OUT, default ./dist (gitignored). On the host every subcommand but `image` and
+# `package` runs inside Docker: the tree is bind-mounted at /src, OUT at /out, the cargo registry
+# and the target directory are named volumes (md-linux-cargo, md-linux-target-<worktree name>) so
+# rebuilds are incremental. On a Linux machine with the -dev packages installed, MD_DEV_NATIVE=1
+# runs the same subcommands directly.
 #
-# Experiment switches for the headless run (docs/linux-facts.md, "Docker-only workarounds"):
+# Passed into the container when set on the host:
+#   GDK_SCALE=2                      HiDPI under Xvfb (the exports' 2× division, §7.5)
+#   ADW_DEBUG_COLOR_SCHEME=prefer-dark   libadwaita's system preference — the carbon-paper theme
+#   MD_SHOT_AFTER                    `run`'s screenshot delay in seconds
+# Experiment switches for the headless run (docs/linux-facts.md §9, "Docker-only workarounds"):
 #   MD_WEBKIT_SANDBOX=1   keep WebKit's bubblewrap sandbox (default: disabled, as Docker needs)
 #   MD_NO_DBUS=1          run without a D-Bus session bus
-#   MD_PROBE_IMAGE=<url>  `probe` also loads this image (mixed-content check); MD_DOCKER_NETWORK
-#                         puts the container on a network where an http server can serve it
+#   MD_DOCKER_NETWORK     puts the container on a Docker network (an http server for remote images)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${MD_IMAGE:-md-linux-dev}"
-OUT_HOST="${MD_OUT:-$ROOT/dist/spike}"
+OUT_HOST="${MD_OUT:-$ROOT/dist}"
 
 # ---------------------------------------------------------------------------------------------
 # Inside the container (or natively on Linux with MD_DEV_NATIVE=1).
@@ -43,8 +49,13 @@ headless() {
     for _ in $(seq 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.1; done
     export DISPLAY="$display"
     export GDK_BACKEND=x11
-    # Docker only: see docs/linux-facts.md "Docker-only workarounds".
-    if [ "${MD_WEBKIT_SANDBOX:-0}" != 1 ]; then export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1; fi
+    # Docker only: see docs/linux-facts.md §9. Docker's seccomp profile denies bubblewrap its user
+    # namespace, so WebKit's sandbox cannot start, and md's own preflight (docs/shell-design.md
+    # §4.1) is skipped for the same reason. A release build ignores MD_SKIP_SANDBOX_PROBE.
+    if [ "${MD_WEBKIT_SANDBOX:-0}" != 1 ]; then
+        export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+        export MD_SKIP_SANDBOX_PROBE=1
+    fi
     # Cosmetic: Xvfb has no DRI3, and without this Mesa's EGL prints two warnings per process.
     # Rendering is identical either way (llvmpipe).
     export LIBGL_ALWAYS_SOFTWARE=1
@@ -55,7 +66,14 @@ headless() {
         dbus-run-session -- "$@" || status=$?
     fi
     kill "$xvfb" 2>/dev/null || true
+    wait "$xvfb" 2>/dev/null || true
     return "$status"
+}
+
+clippy_all() {
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy -p md --all-targets -- -D warnings
+    cargo clippy -p md --all-targets --features selftest -- -D warnings
 }
 
 inner() {
@@ -69,14 +87,13 @@ inner() {
             cargo fmt --all
             ;;
         clippy)
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo clippy -p md --all-targets -- -D warnings
+            clippy_all
             ;;
         test)
             cargo fmt --all -- --check
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo clippy -p md --all-targets -- -D warnings
+            clippy_all
             cargo test --workspace
+            cargo test -p md --features selftest
             ;;
         run)
             cargo build -p md
@@ -93,25 +110,25 @@ inner() {
                 wait "$app" 2>/dev/null || true
             ' _ "$bin" "$after" "$@"
             ;;
-        spike)
-            cargo build -p md
+        selftest)
+            cargo build -p md --features selftest
             local bin="${CARGO_TARGET_DIR:-$ROOT/target}/debug/md"
-            headless "$bin" --spike "$OUT"
-            ;;
-        probe)
-            cargo build -p md
-            local bin="${CARGO_TARGET_DIR:-$ROOT/target}/debug/md"
-            local variants=("$@")
-            [ ${#variants[@]} -eq 0 ] && variants=(plain secure cors secure_cors local secure_cors_csp)
-            for v in "${variants[@]}"; do
-                headless "$bin" --probe "$v" "$OUT" 2>&1 | grep -E "^PROBE|SECURITY|ERROR|terminated|bwrap|Failed" || true
-            done
+            local out="$OUT/selftest"
+            # A fresh profile and no stale report: a run never inherits another's state.
+            rm -rf "$out"
+            mkdir -p "$out/home"
+            # md refuses to self-test unless all four point into its output folder (main.rs).
+            export XDG_CONFIG_HOME="$out/home/.config"
+            export XDG_STATE_HOME="$out/home/.local/state"
+            export XDG_DATA_HOME="$out/home/.local/share"
+            export XDG_CACHE_HOME="$out/home/.cache"
+            headless "$bin" --selftest "$out" "$@"
             ;;
         shell)
             exec bash
             ;;
         *)
-            echo "usage: scripts/dev.sh {image|build|test|clippy|fmt|run|spike|probe|shell}" >&2
+            echo "usage: scripts/dev.sh {image|build|test|clippy|fmt|run|selftest|package|shell}" >&2
             exit 2
             ;;
     esac
@@ -127,10 +144,20 @@ if [ "${MD_DEV_NATIVE:-0}" = 1 ] || [ -f /.dockerenv ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------
-# On the host: everything goes through Docker.
+# On the host: everything goes through Docker, except building the image and packaging (which
+# picks its own image per architecture).
 
 if [ "${1:-}" = image ]; then
     exec docker build -t "$IMAGE" -f "$ROOT/docker/Dockerfile" "$ROOT/docker"
+fi
+
+if [ "${1:-}" = package ]; then
+    shift
+    if [ ! -x "$ROOT/scripts/package.sh" ]; then
+        echo "scripts/package.sh is not here yet (work package P6, docs/packaging.md)" >&2
+        exit 2
+    fi
+    exec "$ROOT/scripts/package.sh" "$@"
 fi
 
 mkdir -p "$OUT_HOST"
@@ -144,5 +171,5 @@ exec docker run --rm "${tty_flags[@]}" \
     -v md-linux-cargo:/cargo \
     -v "md-linux-target-$(basename "$ROOT"):/target" \
     ${MD_DOCKER_NETWORK:+--network "$MD_DOCKER_NETWORK"} \
-    -e MD_SHOT_AFTER -e MD_WEBKIT_SANDBOX -e MD_NO_DBUS -e MD_PROBE_IMAGE -e MD_PROBE_PDF -e MD_PROBE_PRINTER \
+    -e MD_SHOT_AFTER -e MD_WEBKIT_SANDBOX -e MD_NO_DBUS -e GDK_SCALE -e ADW_DEBUG_COLOR_SCHEME \
     "$IMAGE" /src/scripts/dev.sh "$@"
