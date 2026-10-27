@@ -62,7 +62,7 @@ pub struct Shell {
     pub examples: Rc<ExampleLibrary>,
     pub web: Rc<WebServices>,
     /// md-logic's `WritingStatsWordCounter` (`text::word_counter::create`).
-    pub words: Rc<dyn WordCounter>,
+    pub words: std::sync::Arc<dyn WordCounter>,
     pub windows: Rc<WindowManager>,
     pub book: Rc<BookLibraryHost>,
 }
