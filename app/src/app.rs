@@ -5,14 +5,14 @@
 //! application's signals to `windows::window_manager`. `startup` creates the [`Shell`] — every
 //! process-wide service — and keeps it in a thread-local that [`Shell::get`] reads; everything runs
 //! on the GTK main thread, so `Rc` everywhere.
-#![allow(dead_code, unused_variables)] // S0 stub: removed by P1
 
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use md_logic::seams::WordCounter;
+use md_logic::exec::LocalBoxFuture;
+use md_logic::seams::{OffThread, OffThreadValue, OffThreadWork, WordCounter};
 use md_logic::windows::WindowRegistry;
 
 use crate::book::library_host::BookLibraryHost;
@@ -63,8 +63,24 @@ pub struct Shell {
     pub web: Rc<WebServices>,
     /// md-logic's `WritingStatsWordCounter` (`text::word_counter::create`).
     pub words: std::sync::Arc<dyn WordCounter>,
+    /// Work off the UI thread (the derived text, §5.5): GIO's blocking pool, shared by every
+    /// window.
+    pub off_thread: Rc<GioOffThread>,
     pub windows: Rc<WindowManager>,
     pub book: Rc<BookLibraryHost>,
+}
+
+/// md-logic's [`OffThread`] over `gio::spawn_blocking` (shell-design §5.5): the work runs on GIO's
+/// blocking thread pool and the result comes back on the main context; a panic in the work is
+/// `None`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GioOffThread;
+
+impl OffThread for GioOffThread {
+    fn spawn_blocking(&self, work: OffThreadWork) -> LocalBoxFuture<'static, Option<OffThreadValue>> {
+        let handle = gio::spawn_blocking(work);
+        Box::pin(async move { handle.await.ok() })
+    }
 }
 
 thread_local! {
@@ -96,6 +112,7 @@ impl Shell {
             examples: ExampleLibrary::new(&paths),
             web: WebServices::new(&paths),
             words: md_logic::text::word_counter::create(),
+            off_thread: Rc::new(GioOffThread),
             windows: WindowManager::new(&paths),
             book: BookLibraryHost::new(settings),
             paths,
