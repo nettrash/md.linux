@@ -11,6 +11,7 @@
 
 pub mod export_file_names;
 pub mod inflate;
+pub mod latex_export;
 pub mod text_bundle;
 pub mod zip_reader;
 pub mod zip_writer;
