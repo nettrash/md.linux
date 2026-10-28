@@ -22,10 +22,11 @@
 #      machine's own architecture, builds dist/md_<version>_<arch>.deb with dpkg-deb and checks
 #      its info and contents against §1 (see deb_inside for why dpkg-deb runs natively), and from
 #      the same files the portable dist/md-<version>-linux-<x86_64|aarch64>.tar.gz (§12);
-#   4. in a fresh ubuntu:26.04 of the same architecture (§9.3): apt installs the .deb from the
-#      live archive, runs md --version, the MIME mapping of every extension, desktop-file-validate,
-#      appstreamcli validate --no-net, an AppArmor parse of the profile, then apt remove and purge,
-#      and a reinstall; and lintian, in a throwaway ubuntu:26.04 of the machine's own architecture.
+#   4. in a fresh ubuntu:26.04 of the same architecture (§9.3; the image md-linux-ubuntu:<arch>,
+#      the pinned base and nothing else): apt installs the .deb from the live archive, runs
+#      md --version, the MIME mapping of every extension, desktop-file-validate, appstreamcli
+#      validate --no-net, an AppArmor parse of the profile, then apt remove and purge, and a
+#      reinstall; and lintian, in a throwaway ubuntu:26.04 of the machine's own architecture.
 #
 # The package's SOURCE_DATE_EPOCH is the commit time of HEAD.
 #
@@ -39,7 +40,8 @@
 # on the machine that builds it. The bytes match a Docker build's when this machine's compiler and
 # libraries are the snapshot's; a later archive can change them.
 #
-# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses an existing md-linux-dev:<arch> image.
+# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses the existing images md-linux-dev:<arch> and
+# md-linux-ubuntu:<arch>.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -607,14 +609,18 @@ for arch in "${arches[@]}"; do
     [ "$status" = 0 ] || die "the $arch build failed"
 
     if [ "$check" = 1 ]; then
+        if [ "${MD_PACKAGE_SKIP_IMAGE:-0}" != 1 ]; then
+            base_image "$BASE" "$arch" "md-linux-ubuntu:$arch"
+            base_image "$BASE" "$native" "md-linux-ubuntu:$native"
+        fi
         docker run --rm --platform "linux/$arch" \
             -v "$export_dir:/src:ro" \
             -v "$ROOT/dist:/dist:ro" \
-            "$BASE" bash /src/scripts/package.sh --check-inside "$arch"
+            "md-linux-ubuntu:$arch" bash /src/scripts/package.sh --check-inside "$arch"
         docker run --rm --platform "linux/$native" \
             -v "$export_dir:/src:ro" \
             -v "$ROOT/dist:/dist:ro" \
-            "$BASE" bash /src/scripts/package.sh --lintian-inside "$arch"
+            "md-linux-ubuntu:$native" bash /src/scripts/package.sh --lintian-inside "$arch"
     fi
 done
 rm -rf "$export_dir"

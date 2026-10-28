@@ -17,14 +17,16 @@
 #      stages the files of docs/packaging.md §12, and rpmbuild -bb packaging/rpm/md.spec writes
 #      dist/md-<version>-1.fc44.<x86_64|aarch64>.rpm; its Requires and file list are checked, and
 #      rpmlint must report no error;
-#   4. in a fresh Fedora 44 of the same architecture: dnf installs the .rpm, every Requires from
-#      the archive; md --version, ldd, the MIME type of every extension, desktop-file-validate,
-#      appstreamcli validate --no-net; then dnf remove, which must leave nothing of md's behind
-#      and nothing of the user's touched.
+#   4. in a fresh Fedora 44 of the same architecture (the image md-linux-fedora:<arch>, the pinned
+#      base and nothing else): dnf installs the .rpm, every Requires from the archive;
+#      md --version, ldd, the MIME type of every extension, desktop-file-validate, appstreamcli
+#      validate --no-net; then dnf remove, which must leave nothing of md's behind and nothing of
+#      the user's touched.
 #
 # The package's build time and file times are SOURCE_DATE_EPOCH, the commit time of HEAD.
 #
-# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses an existing md-linux-rpm:<arch> image.
+# Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses the existing images md-linux-rpm:<arch> and
+# md-linux-fedora:<arch>.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -281,10 +283,13 @@ for arch in "${arches[@]}"; do
     [ "$status" = 0 ] || die "the $arch build failed"
 
     if [ "$check" = 1 ]; then
+        if [ "${MD_PACKAGE_SKIP_IMAGE:-0}" != 1 ]; then
+            base_image "$BASE" "$arch" "md-linux-fedora:$arch"
+        fi
         docker run --rm --platform "linux/$arch" \
             -v "$export_dir:/src:ro" \
             -v "$ROOT/dist:/dist:ro" \
-            "$BASE" bash /src/scripts/package-rpm.sh --check-inside "$arch"
+            "md-linux-fedora:$arch" bash /src/scripts/package-rpm.sh --check-inside "$arch"
     fi
 done
 rm -rf "$export_dir"

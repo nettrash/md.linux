@@ -34,6 +34,15 @@ export_rustflags() {
     export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$1=/build/md$sep--remap-path-prefix=$2=/cargo$sep--remap-path-prefix=$3=/build/target"
 }
 
+# Step 4's fresh system: the pinned base image $1 (name@sha256:<index>) for linux/$2, tagged $3,
+# made by BuildKit as the build images are. `docker run` of the digest itself works only once per
+# digest in Docker's classic image store (GitHub's runners): the store keeps one image per digest
+# reference, so the same digest for a second architecture fails with "cannot overwrite digest". A
+# tag per architecture has no such limit.
+base_image() {
+    printf 'FROM %s\n' "$1" | docker buildx build --quiet --platform "linux/$2" --load -t "$3" - >/dev/null
+}
+
 # After installing md: one file of every extension typed as md declares it, md offered for each
 # type, and md the default for text/markdown. Sample files go in $1.
 check_mime_types() {

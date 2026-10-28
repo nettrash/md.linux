@@ -448,7 +448,10 @@ prints the `.deb`'s SHA-256; building twice must print the same one (P6's accept
 
 ### 9.3 Checks the script runs before it declares success
 
-In a fresh `ubuntu:26.04` container of the same architecture (`--platform linux/$ARCH`): `apt-get
+In a fresh `ubuntu:26.04` container of the same architecture (`--platform linux/$ARCH`; the image is
+`md-linux-ubuntu:$ARCH`, the Dockerfile's pinned base and nothing else, made with `docker buildx
+build` — running the pinned digest itself fails for the second architecture in Docker's classic
+image store, as on GitHub's runners: "cannot overwrite digest"): `apt-get
 install ./dist/md_1.6.0_$ARCH.deb` (resolving Depends from the archive), `md --version` = `md 1.6.0`,
 `xdg-mime query filetype` for one file of every extension (§3 table), `desktop-file-validate`,
 `appstreamcli validate --no-net`, `lintian` (§8.2), `dpkg -r md` and `dpkg -P md` leaving no file
@@ -575,4 +578,8 @@ On a pushed `v*` tag (or `workflow_dispatch` with an existing tag):
 
 A push to a branch that touches the packaging (`docker/`, `packaging/`, `scripts/package*.sh`, the
 workflow) runs steps 1 and 2 without step 3, so a broken package shows before the tag.
+
+The actions are the first major versions that run on Node 24 (checkout v5, upload-artifact v6,
+download-artifact v7, setup-qemu-action v4, action-gh-release v3), so the run has no deprecation
+annotations.
 

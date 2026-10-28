@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.REF }}
 
@@ -66,7 +66,7 @@ jobs:
 
       - name: Self-test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: selftest
           path: dist/selftest
@@ -85,13 +85,13 @@ jobs:
         arch: [amd64, arm64]
         format: [deb, rpm]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.REF }}
 
       - name: QEMU for arm64 on an amd64 runner
         if: matrix.arch == 'arm64' && runner.arch != 'ARM64'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
@@ -103,7 +103,7 @@ jobs:
         if: matrix.format == 'rpm'
         run: scripts/package-rpm.sh ${{ matrix.arch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: md-${{ matrix.format }}-${{ matrix.arch }}
           path: |
@@ -120,7 +120,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -134,7 +134,7 @@ jobs:
           sha256sum -- *.deb *.rpm *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
           files: |
