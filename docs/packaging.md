@@ -453,6 +453,23 @@ install ./dist/md_1.6.0_$ARCH.deb` (resolving Depends from the archive), `md --v
 `appstreamcli validate --no-net`, `lintian` (§8.2), `dpkg -r md` and `dpkg -P md` leaving no file
 behind but nothing of the user's.
 
+### 9.4 Without Docker — `scripts/package.sh --native`
+
+On an Ubuntu 26.04 machine with the image's build packages (`build-essential pkg-config git rustc
+cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev`; the script names what is missing), the
+same steps run on the machine itself, for its own architecture only:
+
+- the source is exported from git as in the Docker build;
+- §9.2 runs unchanged, with the target directory `target/package` (or a fresh one with `--clean`)
+  and the cargo home `~/.cargo` remapped to the containers' paths, so the binary holds the same
+  paths as a Docker build's;
+- §9.3's lintian runs if `lintian` is installed. The install, MIME, AppArmor and remove/purge
+  checks do not run, since they would install md on the machine that builds it; §11 covers them.
+
+The compiler and libraries are the machine's, so the bytes equal a Docker build's of the same
+commit only while the machine's packages match the image's snapshot. The release build stays the
+Docker one. `MD_DEV_NATIVE=1 scripts/dev.sh package` is the same command.
+
 ---
 
 ## 10. Open questions for nettrash

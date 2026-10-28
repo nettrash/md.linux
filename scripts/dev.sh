@@ -14,7 +14,8 @@
 #                                        `selftest` feature, its profile in OUT/selftest/home (wiped
 #                                        first); args: --only group,… and --no-input
 #                                        (docs/shell-design.md §13). Exits with the run's verdict.
-#   scripts/dev.sh package [arch]        the .deb — delegates to scripts/package.sh (on the host)
+#   scripts/dev.sh package [arch]        the .deb — delegates to scripts/package.sh (on the host);
+#                                        with MD_DEV_NATIVE=1, to scripts/package.sh --native
 #   scripts/dev.sh shell                 an interactive shell in the image
 #
 # OUT is $MD_OUT, default ./dist (gitignored). On the host every subcommand but `image` and
@@ -123,6 +124,9 @@ inner() {
             export XDG_DATA_HOME="$out/home/.local/share"
             export XDG_CACHE_HOME="$out/home/.cache"
             headless "$bin" --selftest "$out" "$@"
+            ;;
+        package)
+            exec "$ROOT/scripts/package.sh" --native "$@"
             ;;
         shell)
             exec bash

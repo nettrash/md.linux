@@ -7,6 +7,8 @@
 #                   builds of one commit give one SHA-256, since an incremental build would not
 #   --no-check      skip the install / uninstall checks in a fresh ubuntu:26.04 container
 #   --allow-dirty   package the working tree although it has uncommitted changes (see below)
+#   --native        no Docker: build on this machine, an Ubuntu 26.04 with the build packages
+#                   (below), for its own architecture only
 #
 # Self-contained: it needs only Docker with buildx (amd64 runs under emulation on an arm64 Mac).
 # `scripts/dev.sh package [arch…]` delegates here. Per architecture it
@@ -26,6 +28,16 @@
 #
 # The package's SOURCE_DATE_EPOCH is the commit time of HEAD.
 #
+# --native runs step 3 on this machine instead: the build packages are docker/Dockerfile's
+#
+#   sudo apt install build-essential pkg-config git rustc cargo \
+#        libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev
+#
+# and the target directory is target/package (--clean: a new one, removed afterwards). Of step 4
+# it runs lintian only, if installed (sudo apt install lintian): it does not install the package
+# on the machine that builds it. The bytes match a Docker build's when this machine's compiler and
+# libraries are the snapshot's; a later archive can change them.
+#
 # Environment: MD_PACKAGE_SKIP_IMAGE=1 reuses an existing md-linux-dev:<arch> image.
 set -euo pipefail
 
@@ -34,6 +46,11 @@ PKG=md
 
 say() { printf '%s\n' "package: $*" >&2; }
 die() { say "FAILED: $*"; exit 1; }
+
+# Where the steps find the source, the staging area, the output, the target directory and the
+# cargo home: the containers' mounts, unless --native points them at this machine.
+SRC=/src STAGE=/stage OUT=/out
+TARGET="${CARGO_TARGET_DIR:-/target}" CARGO_DIR="${CARGO_HOME:-/cargo}"
 
 # The packages dpkg-shlibdeps may name for /usr/bin/md: the libraries behind the -sys crates of
 # app/Cargo.toml, plus libc and libgcc. Anything else is a new linkage to review, not to ship.
@@ -54,9 +71,9 @@ ALLOWED_CRATE_LICENSES="MIT|MIT OR Apache-2.0|Apache-2.0 OR MIT|Unlicense OR MIT
 
 build_inside() {
     local arch="$1"
-    local version stage out deb
-    cd /src
-    [ "$(dpkg --print-architecture)" = "$arch" ] || die "container is $(dpkg --print-architecture), not $arch"
+    local version stage
+    cd "$SRC"
+    [ "$(dpkg --print-architecture)" = "$arch" ] || die "this system is $(dpkg --print-architecture), not $arch"
     [ -n "${SOURCE_DATE_EPOCH:-}" ] || die "SOURCE_DATE_EPOCH is not set"
 
     version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
@@ -67,16 +84,19 @@ build_inside() {
 
     check_crates
 
-    # Reproducible: fixed paths in the binary, no debug info, symbols stripped, one codegen unit
-    # (the workspace's [profile.release]); the selftest feature is never built into the package.
-    export RUSTFLAGS="--remap-path-prefix=/src=/build/md --remap-path-prefix=/cargo=/cargo --remap-path-prefix=/target=/build/target"
-    export CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_DEBUG=false
+    # Reproducible: fixed paths in the binary (the containers' ones, wherever it is built), no debug
+    # info, symbols stripped, one codegen unit (the workspace's [profile.release]); the selftest
+    # feature is never built into the package. The flags go in encoded, one per \x1f, so a path
+    # with a space survives, and they replace any RUSTFLAGS or build.rustflags of the machine's.
+    local sep=$'\x1f'
+    export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$SRC=/build/md$sep--remap-path-prefix=$CARGO_DIR=/cargo$sep--remap-path-prefix=$TARGET=/build/target"
+    export CARGO_TARGET_DIR="$TARGET" CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_DEBUG=false
     say "cargo build --release --locked -p md ($arch)"
     cargo build --release --locked -p md
-    local bin="${CARGO_TARGET_DIR:-/target}/release/md"
+    local bin="$TARGET/release/md"
     if readelf -S "$bin" | grep -qE '\.(symtab|debug_[a-z]+)'; then die "the binary is not stripped"; fi
 
-    stage=/stage/tree
+    stage="$STAGE/tree"
     rm -rf "$stage"
     mkdir -p "$stage"
     install -D -m 0755 "$bin" "$stage/usr/bin/md"
@@ -129,7 +149,7 @@ build_inside() {
     chmod 0644 "$stage/DEBIAN/control" "$stage/DEBIAN/conffiles" "$stage/DEBIAN/md5sums"
 
     find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
-    printf '%s\n' "$depends" > /stage/depends
+    printf '%s\n' "$depends" > "$STAGE/depends"
     say "staged for $arch"
 }
 
@@ -139,21 +159,21 @@ build_inside() {
 # names its files to tar; what dpkg-deb writes depends on its version and its input, not on the
 # processor it runs on, and both images carry the same dpkg from the same snapshot.
 deb_inside() {
-    local arch="$1" version stage=/stage/tree out=/out deb depends
-    cd /src
+    local arch="$1" version stage="$STAGE/tree" deb depends
+    cd "$SRC"
     version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
     [ -f "$stage/DEBIAN/control" ] || die "nothing staged for $arch"
     grep -qx "Architecture: $arch" "$stage/DEBIAN/control" || die "the staged tree is not $arch"
-    depends="$(cat /stage/depends)"
-    deb="$out/${PKG}_${version}_${arch}.deb"
+    depends="$(cat "$STAGE/depends")"
+    deb="$OUT/${PKG}_${version}_${arch}.deb"
     rm -f "$deb"
     # One xz thread: liblzma's multi-threaded output is laid out in blocks, so the bytes would
     # depend on how many CPUs the building machine has.
     dpkg-deb --root-owner-group --threads-max=1 -Zxz -z9 --build "$stage" "$deb" >/dev/null
     check_layout "$deb" "$version" "$arch" "$depends"
-    rm -rf "$stage" /stage/depends
+    rm -rf "$stage" "$STAGE/depends"
     say "built $(basename "$deb"): $(stat -c %s "$deb") bytes"
-    (cd "$out" && sha256sum "$(basename "$deb")")
+    (cd "$OUT" && sha256sum "$(basename "$deb")")
 }
 
 # Every crate the binary links (normal edges, no proc macros: their code runs at compile time)
@@ -434,27 +454,51 @@ EOF
 # the tar limitation deb_inside describes. No error or warning; overrides only for the tags §8.2
 # lists; and the font overrides must be there, or lintian did not look at the package at all.
 lintian_inside() {
-    local arch="$1" version deb code=0 status=0
+    local arch="$1" version deb
     version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' /src/Cargo.toml)"
     deb="/dist/${PKG}_${version}_${arch}.deb"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends lintian >/dev/null
-    say "lintian $(dpkg-query -W -f '${Version}' lintian) on $(basename "$deb")"
     cp "$deb" /tmp/lintian.deb && chmod 0644 /tmp/lintian.deb
-    runuser -u nobody -- env HOME=/tmp lintian --display-info --show-overrides --tag-display-limit 0 \
-        /tmp/lintian.deb > /tmp/lintian.log 2>&1 || code=$?
-    grep -v '^N: ' /tmp/lintian.log | sed 's/^/  /' >&2
+    lintian_check /tmp/lintian.deb "$(basename "$deb")" runuser -u nobody -- env HOME=/tmp
+}
+
+# lintian on the .deb $1 (named $2 in the messages), started through the command in the remaining
+# arguments (none for --native, which runs as the user already), and the verdict.
+lintian_check() {
+    local deb="$1" name="$2" log code=0 status=0
+    shift 2
+    log="$(mktemp /tmp/md-lintian.XXXXXX)"
+    say "lintian $(dpkg-query -W -f '${Version}' lintian) on $name"
+    "$@" lintian --display-info --show-overrides --tag-display-limit 0 "$deb" > "$log" 2>&1 || code=$?
+    grep -v '^N: ' "$log" | sed 's/^/  /' >&2
     if [ "$code" -gt 1 ]; then say "CHECK FAILED: lintian could not run (exit $code)"; status=1; fi
-    if grep -qE '^(E|W): ' /tmp/lintian.log; then say "CHECK FAILED: lintian reports errors or warnings"; status=1; fi
-    if grep -E '^O: ' /tmp/lintian.log | grep -vqE ' (font-in-non-font-package|font-outside-font-dir|embedded-javascript-library|package-contains-documentation-outside-usr-share-doc|hardening-no-fortify-functions) '; then
+    if grep -qE '^(E|W): ' "$log"; then say "CHECK FAILED: lintian reports errors or warnings"; status=1; fi
+    if grep -E '^O: ' "$log" | grep -vqE ' (font-in-non-font-package|font-outside-font-dir|embedded-javascript-library|package-contains-documentation-outside-usr-share-doc|hardening-no-fortify-functions) '; then
         say "CHECK FAILED: lintian overrides a tag docs/packaging.md §8.2 does not list"; status=1
     fi
-    if ! grep -qE '^O: md: font-in-non-font-package ' /tmp/lintian.log; then
+    if ! grep -qE '^O: md: font-in-non-font-package ' "$log"; then
         say "CHECK FAILED: lintian reported nothing about the KaTeX fonts: it did not analyse the package"; status=1
     fi
-    [ "$status" = 0 ] || die "lintian checks failed for $(basename "$deb")"
+    rm -f "$log"
+    [ "$status" = 0 ] || die "lintian checks failed for $name"
     say "ok: lintian: no error or warning, overrides only from docs/packaging.md §8.2"
+}
+
+# --native: this machine should be the release it packages for (Depends comes from its libraries),
+# with docker/Dockerfile's build packages.
+check_native_machine() {
+    local os tool missing=""
+    os="$(. /etc/os-release 2>/dev/null && printf '%s %s' "${ID:-?}" "${VERSION_ID:-?}")" || os="unknown"
+    [ "$os" = "ubuntu 26.04" ] || say "warning: this system is '$os', not ubuntu 26.04, which the package is for"
+    for tool in git cargo rustc pkg-config dpkg-deb dpkg-shlibdeps readelf strip; do
+        command -v "$tool" >/dev/null || missing="$missing $tool"
+    done
+    if command -v pkg-config >/dev/null && ! pkg-config --exists gtk4 libadwaita-1 webkitgtk-6.0; then
+        missing="$missing gtk4/libadwaita-1/webkitgtk-6.0 (pkg-config)"
+    fi
+    [ -z "$missing" ] || die "missing:$missing — install the build packages: sudo apt install build-essential pkg-config git rustc cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -467,15 +511,16 @@ case "${1:-}" in
     --check-inside) check_inside "$2"; exit ;;
 esac
 
-clean=0 check=1 allow_dirty=0
+clean=0 check=1 allow_dirty=0 native_build=0
 arches=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --clean) clean=1 ;;
         --no-check) check=0 ;;
         --allow-dirty) allow_dirty=1 ;;
+        --native) native_build=1 ;;
         amd64 | arm64) arches+=("$1") ;;
-        *) echo "usage: scripts/package.sh [--clean] [--no-check] [--allow-dirty] [amd64|arm64 …]" >&2; exit 2 ;;
+        *) echo "usage: scripts/package.sh [--native] [--clean] [--no-check] [--allow-dirty] [amd64|arm64 …]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -483,12 +528,16 @@ if [ ${#arches[@]} -eq 0 ]; then
     case "$(uname -m)" in arm64 | aarch64) arches=(arm64) ;; *) arches=(amd64) ;; esac
 fi
 
-command -v docker >/dev/null || die "docker is not installed"
+if [ "$native_build" = 1 ]; then
+    check_native_machine
+else
+    command -v docker >/dev/null || die "docker is not installed (on Ubuntu 26.04, --native builds without it)"
+    BASE="$(sed -n 's/^FROM \(ubuntu:26\.04@sha256:[0-9a-f]*\).*$/\1/p' "$ROOT/docker/Dockerfile")"
+    [ -n "$BASE" ] || die "docker/Dockerfile does not pin ubuntu:26.04 by digest"
+fi
 git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1 || die "$ROOT is not a git checkout"
 SOURCE_DATE_EPOCH="$(git -C "$ROOT" log -1 --format=%ct HEAD)"
 export SOURCE_DATE_EPOCH
-BASE="$(sed -n 's/^FROM \(ubuntu:26\.04@sha256:[0-9a-f]*\).*$/\1/p' "$ROOT/docker/Dockerfile")"
-[ -n "$BASE" ] || die "docker/Dockerfile does not pin ubuntu:26.04 by digest"
 
 # The source, from git (step 2).
 export_dir="$ROOT/dist/.package-source"
@@ -506,6 +555,27 @@ else
     die "the working tree has uncommitted changes: commit them, or pass --allow-dirty"
 fi
 mkdir -p "$ROOT/dist"
+
+# --native: step 3 on this machine, then lintian (step 4's other checks install the package).
+if [ "$native_build" = 1 ]; then
+    host="$(dpkg --print-architecture)"
+    for arch in "${arches[@]}"; do
+        [ "$arch" = "$host" ] || die "--native builds for this machine's architecture ($host) only, not $arch"
+    done
+    SRC="$export_dir" OUT="$ROOT/dist" CARGO_DIR="${CARGO_HOME:-$HOME/.cargo}"
+    STAGE="$(mktemp -d "${TMPDIR:-/tmp}/md-package-stage.XXXXXX")"
+    if [ "$clean" = 1 ]; then TARGET="$ROOT/target/package-clean-$$"; else TARGET="$ROOT/target/package"; fi
+    trap 'rm -rf "$STAGE" "$export_dir"; if [ "$clean" = 1 ]; then rm -rf "$TARGET"; fi' EXIT
+    build_inside "$host"
+    deb_inside "$host"
+    version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' "$SRC/Cargo.toml")"
+    deb="$OUT/${PKG}_${version}_${host}.deb"
+    if [ "$check" = 0 ]; then :
+    elif command -v lintian >/dev/null; then lintian_check "$deb" "$(basename "$deb")"
+    else say "lintian is not installed, so it did not run (sudo apt install lintian)"; fi
+    say "install it with: sudo apt install $(printf '%q' "$deb")"
+    exit 0
+fi
 
 case "$(docker version --format '{{.Server.Arch}}')" in
     arm64 | aarch64) native=arm64 ;;

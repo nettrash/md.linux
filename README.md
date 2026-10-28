@@ -228,7 +228,8 @@ folder.
 Everything builds in Docker, in the `ubuntu:26.04` image `docker/Dockerfile`
 describes (the base image is pinned by digest and the archive by an Ubuntu
 snapshot date, so a rebuild gets the same compiler and libraries). The two
-libraries also build and test natively anywhere Rust 1.93 runs.
+libraries also build and test natively anywhere Rust 1.93 runs, and on
+Ubuntu 26.04 itself the app and the `.deb` build without Docker (below).
 
 ```bash
 # The parity core and the shell's logic, any OS (the workspace's default members).
@@ -255,6 +256,22 @@ apt, checks `md --version`, the file type of every extension md opens,
 `desktop-file-validate`, `appstreamcli validate`, the AppArmor profile and
 lintian, then removes and purges it. `docs/packaging.md` describes the
 package and the manual test on a real Ubuntu desktop.
+
+### On Ubuntu 26.04, without Docker
+
+```bash
+sudo apt install build-essential pkg-config git rustc cargo \
+     libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev
+cargo run -p md                     # run md from the source tree
+scripts/package.sh --native         # dist/md_1.6.0_<this machine's arch>.deb
+sudo apt install ./dist/md_1.6.0_amd64.deb
+```
+
+`--native` builds the package for the machine's own architecture with its
+own compiler and libraries, checks its layout, and runs lintian when it is
+installed (`sudo apt install lintian`). It does not install the package for
+you. While the machine's packages are those of the Docker image's snapshot,
+the `.deb` is byte-identical to the Docker build's.
 
 ## Project layout
 
