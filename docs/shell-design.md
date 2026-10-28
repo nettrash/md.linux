@@ -593,7 +593,7 @@ greyed there.
 
 The spike's handler, kept (facts §3): `md-asset://<host>/index.html` is the page set for that host
 (`AssetHost::set_page(host, html)`); `md-asset://<host>/rich/<rel>` is read from `Paths::rich_dir()`
-(`/usr/share/md/rich`; `MD_DATA_DIR` overrides; the source tree only in debug builds) after the
+(`/usr/share/md/rich`; `MD_DATA_DIR` overrides; a build in a checkout reads the checkout's, §9.3) after the
 containment check (no empty, `.` or `..` segment, no `\`, `%` or NUL); anything else is a 404 with an
 empty body. Each response: `URISchemeResponse::new(&gio::MemoryInputStream::from_bytes(..), len)`,
 `set_status`, `set_content_type` (md-logic `preview::AssetMime::for(..)` — the Mac's nine rows;
@@ -1177,8 +1177,10 @@ PRIVACY.md (packaging work package) enumerates exactly these.
 
 ### 9.3 `Paths`
 
-`data_dir`: `$MD_DATA_DIR`, else `/usr/share/md`, else — debug builds only — the source tree
-(`rich/`, `examples/`). `rich_dir = data_dir/rich`, `examples_dir = data_dir/examples`. The XDG
+`data_dir`: `$MD_DATA_DIR`; else beside the executable — `<prefix>/share/md` for
+`<prefix>/bin/md`, or the checkout for a binary cargo built in it (`target/release/md`), each only
+when it holds `rich/md-init.js` and `examples/`; else `/usr/share/md`; else — debug builds only —
+the source tree (`rich/`, `examples/`). `rich_dir = data_dir/rich`, `examples_dir = data_dir/examples`. The XDG
 folders come from `glib::user_config_dir()`, `user_state_dir()`, `user_data_dir()`,
 `user_runtime_dir()`, created on first write.
 

@@ -215,6 +215,33 @@ fn check_menus(h: &Harness, window: &DocumentWindow) {
     let find = actual.iter().any(|r| r == "Edit \u{25B8} Find \u{25B8} Find and Replace\u{2026}|win.replace");
     let wrap = actual.iter().any(|r| r.contains("Wrap Selection When Typing * _ ` $|app.wrap-selection"));
     h.check("linux_titles", quit && find && wrap, "Quit, Edit ▸ Find ▸ Find and Replace…, the underscore kept");
+
+    // File ▸ Examples lists the bundled examples wherever md runs from — an install, or a build in
+    // a checkout. Without its data folder only Example Book… would be left.
+    let mut examples = Vec::new();
+    labels_on_action(&model, "app.example", &mut examples);
+    h.check("examples_listed", examples == EXAMPLE_NAMES, examples.join(" · "));
+}
+
+/// File ▸ Examples, as on the Mac.
+const EXAMPLE_NAMES: [&str; 9] =
+    ["Welcome", "Formatting", "Tables", "Code", "Images", "Math", "Diagrams", "Plots", "Writer Tools"];
+
+/// The displayed labels of every row on `action`, in menu order.
+fn labels_on_action(model: &gio::MenuModel, action: &str, out: &mut Vec<String>) {
+    for i in 0..model.n_items() {
+        for link in [gio::MENU_LINK_SECTION, gio::MENU_LINK_SUBMENU] {
+            if let Some(child) = model.item_link(i, link) {
+                labels_on_action(&child, action, out);
+            }
+        }
+        let attribute = |name: &str| {
+            model.item_attribute_value(i, name, Some(glib::VariantTy::STRING)).and_then(|v| v.str().map(str::to_string))
+        };
+        if attribute(gio::MENU_ATTRIBUTE_ACTION).as_deref() == Some(action) {
+            out.push(menu_bar::displayed(&attribute(gio::MENU_ATTRIBUTE_LABEL).unwrap_or_default()));
+        }
+    }
 }
 
 fn check_accelerators(h: &Harness) {

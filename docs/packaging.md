@@ -42,7 +42,8 @@ facts it relies on were checked in the image on 2026-10-27 (versions below) or a
 | `/usr/share/lintian/overrides/md` | 0644 | `packaging/lintian-overrides` | §8 |
 | `DEBIAN/control`, `md5sums`, `conffiles`, `postinst`, `postrm` | 0644 / scripts 0755 | `packaging/control.in`, scripts | §7, §8 |
 
-The binary finds its data through `Paths` (shell-design §9.3): `$MD_DATA_DIR`, else `/usr/share/md`.
+The binary finds its data through `Paths` (shell-design §9.3): `$MD_DATA_DIR`, else beside the
+executable — `/usr/bin/md` finds `/usr/share/md`.
 Nothing is installed under `/usr/lib`, `/var` or `/opt`; nothing in the user's home is created by the
 package.
 

@@ -1,7 +1,9 @@
 //! Where md reads its bundled data and keeps its state (shell-design §9.3, §9.2).
 //!
-//! Install data: `$MD_DATA_DIR`, else `/usr/share/md`, else — debug builds only — the source tree,
-//! so `scripts/dev.sh run` works from a checkout. The per-user folders come from GLib
+//! Install data: `$MD_DATA_DIR`; else the folder beside the executable — `<prefix>/share/md` for
+//! `<prefix>/bin/md`, or the checkout for a binary cargo built in it (`target/release/md`); else
+//! `/usr/share/md`; else — debug builds only — the source tree, so `scripts/dev.sh run` works from
+//! a checkout whose target directory is elsewhere. The per-user folders come from GLib
 //! (`glib::user_config_dir()` and friends, which honour the XDG variables) and are created on first
 //! write, never here.
 
@@ -27,10 +29,12 @@ pub struct Paths {
 }
 
 impl Paths {
-    /// The folders of this process: `$MD_DATA_DIR` and the XDG variables as GLib reads them.
+    /// The folders of this process: `$MD_DATA_DIR`, the executable's place, and the XDG variables
+    /// as GLib reads them.
     pub fn new() -> Paths {
+        let exe = std::env::current_exe().ok();
         Paths {
-            data_dir: data_dir(std::env::var_os("MD_DATA_DIR").map(PathBuf::from)),
+            data_dir: data_dir(std::env::var_os("MD_DATA_DIR").map(PathBuf::from), exe.as_deref()),
             config_dir: glib::user_config_dir().join(APP_FOLDER),
             state_dir: glib::user_state_dir().join(APP_FOLDER),
             user_data_dir: glib::user_data_dir().join(APP_FOLDER),
@@ -69,11 +73,15 @@ impl Paths {
     }
 }
 
-/// `$MD_DATA_DIR` when set and not empty; else the installed folder when it exists; else, in a
-/// debug build, the source tree (the workspace root holds `rich/` and `examples/`); else the
-/// installed folder anyway, so a broken install reports the missing files by their real path.
-fn data_dir(overridden: Option<PathBuf>) -> PathBuf {
+/// `$MD_DATA_DIR` when set and not empty; else the data beside the executable `exe`
+/// ([`beside_executable`]); else the installed folder when it exists; else, in a debug build, the
+/// source tree (the workspace root holds `rich/` and `examples/`); else the installed folder
+/// anyway, so a broken install reports the missing files by their real path.
+fn data_dir(overridden: Option<PathBuf>, exe: Option<&Path>) -> PathBuf {
     if let Some(dir) = overridden.filter(|dir| !dir.as_os_str().is_empty()) {
+        return dir;
+    }
+    if let Some(dir) = exe.and_then(beside_executable) {
         return dir;
     }
     let installed = Path::new(INSTALLED_DATA_DIR);
@@ -89,6 +97,21 @@ fn data_dir(overridden: Option<PathBuf>) -> PathBuf {
     {
         installed.to_path_buf()
     }
+}
+
+/// The data an executable at `exe` carries with it: `<prefix>/share/md` for `<prefix>/bin/md`
+/// (`/usr/bin/md` finds `/usr/share/md`), else the checkout for `<checkout>/target/<profile>/md`,
+/// so a release build run from the tree finds its examples and engines. Each only when it holds
+/// both; `None` otherwise.
+fn beside_executable(exe: &Path) -> Option<PathBuf> {
+    let holds_data = |dir: &Path| dir.join("rich").join("md-init.js").is_file() && dir.join("examples").is_dir();
+    let prefix = exe.parent()?.parent()?;
+    let shared = prefix.join("share").join(APP_FOLDER);
+    if holds_data(&shared) {
+        return Some(shared);
+    }
+    let checkout = prefix.parent()?;
+    holds_data(checkout).then(|| checkout.to_path_buf())
 }
 
 /// `folder` with the home folder written `~` — how the header bar's subtitle and Open Recent's
@@ -116,11 +139,68 @@ pub fn display_folder(folder: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A folder under the temp directory, removed on drop.
+    struct TempFolder(PathBuf);
+
+    impl TempFolder {
+        fn new(tag: &str) -> TempFolder {
+            let path = std::env::temp_dir().join(format!("md-paths-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            TempFolder(path)
+        }
+
+        /// `rich/md-init.js` and `examples/` under `dir`.
+        fn with_data(&self, dir: &str) -> PathBuf {
+            let dir = self.0.join(dir);
+            std::fs::create_dir_all(dir.join("rich")).unwrap();
+            std::fs::create_dir_all(dir.join("examples")).unwrap();
+            std::fs::write(dir.join("rich/md-init.js"), "").unwrap();
+            dir
+        }
+    }
+
+    impl Drop for TempFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn md_data_dir_wins_and_an_empty_one_does_not() {
-        assert_eq!(data_dir(Some(PathBuf::from("/opt/md"))), PathBuf::from("/opt/md"));
-        let fallback = data_dir(Some(PathBuf::new()));
-        assert_eq!(fallback, data_dir(None));
+        let temp = TempFolder::new("override");
+        let exe = temp.with_data("checkout").join("target/release/md");
+        assert_eq!(data_dir(Some(PathBuf::from("/opt/md")), Some(&exe)), PathBuf::from("/opt/md"));
+        let fallback = data_dir(Some(PathBuf::new()), None);
+        assert_eq!(fallback, data_dir(None, None));
+    }
+
+    #[test]
+    fn a_release_build_in_a_checkout_finds_the_checkout() {
+        let temp = TempFolder::new("checkout");
+        let checkout = temp.with_data("md.linux");
+        assert_eq!(data_dir(None, Some(&checkout.join("target/release/md"))), checkout);
+        assert_eq!(data_dir(None, Some(&checkout.join("target/debug/md"))), checkout);
+    }
+
+    #[test]
+    fn a_prefix_install_finds_its_share_folder() {
+        let temp = TempFolder::new("prefix");
+        let shared = temp.with_data("opt/share/md");
+        assert_eq!(beside_executable(&temp.0.join("opt/bin/md")), Some(shared));
+    }
+
+    #[test]
+    fn a_folder_without_both_parts_is_not_data() {
+        let temp = TempFolder::new("partial");
+        std::fs::create_dir_all(temp.0.join("tree/examples")).unwrap();
+        assert_eq!(beside_executable(&temp.0.join("tree/target/release/md")), None);
+        std::fs::create_dir_all(temp.0.join("tree/rich")).unwrap();
+        assert_eq!(beside_executable(&temp.0.join("tree/target/release/md")), None);
+        std::fs::write(temp.0.join("tree/rich/md-init.js"), "").unwrap();
+        assert_eq!(beside_executable(&temp.0.join("tree/target/release/md")), Some(temp.0.join("tree")));
+        assert_eq!(beside_executable(Path::new("/md")), None);
+        assert_eq!(beside_executable(Path::new("md")), None);
     }
 
     #[test]
@@ -128,7 +208,7 @@ mod tests {
         if Path::new(INSTALLED_DATA_DIR).is_dir() {
             return; // an installed md is preferred; nothing to check here
         }
-        let dir = data_dir(None);
+        let dir = data_dir(None, None);
         assert!(dir.join("rich/md-init.js").is_file(), "{}", dir.display());
         assert!(dir.join("examples").is_dir(), "{}", dir.display());
     }
