@@ -1,0 +1,19 @@
+<h1 id="plantuml">PlantUML</h1>
+<p>A sequence diagram:</p>
+<div class="plantuml">@startuml
+Alice -&gt; Bob: Authentication Request
+Bob --&gt; Alice: Authentication Response
+@enduml</div>
+<p>A class diagram:</p>
+<div class="plantuml">@startuml
+class Document {
+  +text: String
+  +save()
+}
+class Editor
+Editor --&gt; Document : edits
+@enduml</div>
+<p>The short alias behaves identically:</p>
+<div class="plantuml">@startuml
+Bob -&gt; Alice : hello
+@enduml</div>

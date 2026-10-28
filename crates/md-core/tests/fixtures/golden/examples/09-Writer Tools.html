@@ -1,0 +1,70 @@
+<h1 id="writer-tools">Writer Tools</h1>
+<p>Beyond formatting, md carries a few tools for longer work: in-document<br>
+links, private notes, page breaks, front matter, and footnotes. Jump<br>
+straight to <a href="#private-notes">Private notes</a>, <a href="#page-breaks">Page breaks</a>,<br>
+<a href="#front-matter">Front matter</a> or <a href="#footnotes">Footnotes</a> below.</p>
+<h2 id="navigating-with-contents">Navigating with Contents</h2>
+<p>Every heading in a document feeds the <strong>Contents</strong> menu, and each one is<br>
+also a link target: <code>[Page breaks](#page-breaks)</code> links to the heading of<br>
+that name — lowercase, with spaces turned into hyphens.</p>
+<h2 id="private-notes">Private notes</h2>
+<p>A comment beginning with <code>note:</code> is a private author note. It appears in<br>
+the <strong>Notes</strong> menu while you write, but never in Preview, PDF, or print.</p>
+
+<p>There is a real note hidden just above this line. Ordinary HTML comments<br>
+are simply dropped.</p>
+<h2 id="page-breaks">Page breaks</h2>
+<p>Put <code>\newpage</code> (or <code>\pagebreak</code>) on a line of its own to end the page in<br>
+PDF export and print. In Preview it shows as a dashed rule:</p>
+<div class="md-pagebreak"></div>
+<p>Everything after the break starts a fresh page in the exported document —<br>
+ideal for title pages, chapters, and handouts. An exported HTML page is<br>
+read on a screen rather than on paper, so there it shows the same dashed<br>
+rule Preview does.</p>
+<h2 id="front-matter">Front matter</h2>
+<p>Files written for a blog, a site generator, or a notes app often begin<br>
+with a block of metadata — the title, the author, a date — fenced off<br>
+above the text. md reads both of the usual spellings, YAML between <code>---</code><br>
+lines and TOML between <code>+++</code> lines:</p>
+<pre><code class="language-markdown">---
+title: My Post
+author: nettrash
+date: 2026-07-24
+---
+
+# Hello</code></pre>
+<p>The block is kept with the file and hidden from the page, so a document<br>
+like that one starts at its heading in Preview, PDF, and print instead of<br>
+opening with a stray rule and a paragraph of metadata.</p>
+<p>It counts as front matter only at the very top of the file and only when<br>
+it is closed again (<code>---</code> or <code>...</code> for YAML, <code>+++</code> for TOML), and only<br>
+when it really holds fields: with no <code>key: value</code> line inside it at all,<br>
+the block is not metadata, and every word of it stays on the page — read<br>
+as the rule and text it looks like. Anywhere else, <code>---</code> is the ordinary<br>
+horizontal rule it has always been.</p>
+<h2 id="footnotes">Footnotes</h2>
+<p>An aside that would break the flow of a sentence can go to the foot of<br>
+the page instead. Mark the spot with <code>[^id]</code>, and write the note itself<br>
+on a line of its own as <code>[^id]: the note</code>.</p>
+<p>The original Markdown had no footnotes<sup class="md-fnref" id="fnref-1"><a href="#fn-1">1</a></sup>, so md follows the spelling<br>
+GitHub and Pandoc settled on — and a note may run as long as it needs<br>
+to<sup class="md-fnref" id="fnref-2"><a href="#fn-2">2</a></sup>.</p>
+
+
+
+<p>Nothing appears where those notes are written. They are collected under a<br>
+rule at the foot of the rendered page instead, so read the end of this<br>
+document in Preview to see them. They are numbered in the order you meet<br>
+the references while reading rather than the order they were written — the<br>
+notes above are deliberately the wrong way round, and they still come out<br>
+1 and 2 as you met them. Each number links down to its note, and each note<br>
+you cited ends in an arrow back to where you first cited it. Cite that<br>
+same note again<sup class="md-fnref" id="fnref-2-2"><a href="#fn-2">2</a></sup> and the second reference carries the same number<br>
+and links down to the same note; the note keeps its single arrow, pointing<br>
+at the first place you cited it.</p>
+<p>A reference with no note behind it — [^missing] — stays exactly the text<br>
+you typed rather than becoming a link to nowhere. And a note you never<br>
+cite, like the third one at the foot of this page, is printed all the<br>
+same rather than quietly dropped.</p>
+<p><a href="#writer-tools">Back to the top</a></p>
+<section class="md-footnotes"><hr><ol><li id="fn-1"><code>[^id]</code> comes from GitHub-Flavored Markdown and from Pandoc, which spell it the same way. <a class="md-fnback" href="#fnref-1">&#8617;</a></li><li id="fn-2">A note can wrap over as many lines as it likes: carry on typing on the next line and md joins it up, the way a wrapped list item behaves. <a class="md-fnback" href="#fnref-2">&#8617;</a></li><li id="fn-3">This note is never cited anywhere in the document, and is printed all the same — last, and without an arrow, since there is nowhere to go back to.</li></ol></section>

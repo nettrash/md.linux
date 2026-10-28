@@ -1,0 +1,25 @@
+<h1 id="tables">Tables</h1>
+<p>md renders GitHub-style tables: pipes divide the columns, and a row of<br>
+dashes separates the header from the body.</p>
+<table><thead><tr><th style="text-align:left">Day</th><th style="text-align:left">Plan</th><th style="text-align:left">Done</th></tr></thead><tbody><tr><td style="text-align:left">Monday</td><td style="text-align:left">Outline the article</td><td style="text-align:left">Yes</td></tr><tr><td style="text-align:left">Tuesday</td><td style="text-align:left">First draft</td><td style="text-align:left">Yes</td></tr><tr><td style="text-align:left">Wednesday</td><td style="text-align:left">Edit and polish</td><td style="text-align:left">Not yet</td></tr></tbody></table>
+<h2 id="column-alignment">Column alignment</h2>
+<p>Colons in the divider row set the alignment — left, center, or right:</p>
+<table><thead><tr><th style="text-align:left">Item</th><th style="text-align:center">Quantity</th><th style="text-align:right">Price</th></tr></thead><tbody><tr><td style="text-align:left">Notebook</td><td style="text-align:center">2</td><td style="text-align:right">9.90</td></tr><tr><td style="text-align:left">Pen</td><td style="text-align:center">12</td><td style="text-align:right">1.25</td></tr><tr><td style="text-align:left">Desk</td><td style="text-align:center">1</td><td style="text-align:right">240.00</td></tr></tbody></table>
+<p>Right-aligned columns keep numbers tidy.</p>
+<h2 id="formatting-inside-cells">Formatting inside cells</h2>
+<p>Cells can hold inline formatting, links, and code:</p>
+<table><thead><tr><th style="text-align:left">Write this</th><th style="text-align:left">Get this</th></tr></thead><tbody><tr><td style="text-align:left"><code>**bold**</code></td><td style="text-align:left"><strong>bold</strong></td></tr><tr><td style="text-align:left"><code>*italic*</code></td><td style="text-align:left"><em>italic</em></td></tr><tr><td style="text-align:left"><code>[link](…)</code></td><td style="text-align:left"><a href="https://nettrash.me">link</a></td></tr></tbody></table>
+<p>Wide tables scroll sideways in Preview rather than squeezing the text.</p>
+<h2 id="straight-from-a-spreadsheet">Straight from a spreadsheet</h2>
+<p>Pipes are fine for a table you write by hand, but figures usually arrive<br>
+from somewhere else. Paste them as they come into a block tagged <code>csv</code> —<br>
+or <code>tsv</code>, for the tab-separated text a spreadsheet puts on the clipboard —<br>
+and md draws the table for you:</p>
+<table><thead><tr><th style="text-align:left">Item</th><th style="text-align:left">Size, packed</th><th style="text-align:right">Units</th><th style="text-align:right">Price</th></tr></thead><tbody><tr><td style="text-align:left">Notebook</td><td style="text-align:left">21 × 30 cm</td><td style="text-align:right">120</td><td style="text-align:right">9.90</td></tr><tr><td style="text-align:left">Pen</td><td style="text-align:left">14 cm</td><td style="text-align:right">640</td><td style="text-align:right">1.25</td></tr><tr><td style="text-align:left">Pipe</td><td style="text-align:left">5&quot; copper</td><td style="text-align:right">18</td><td style="text-align:right">3.40</td></tr></tbody></table>
+<p>The first row is the header. A field wrapped in quotes may hold a comma —<br>
+&quot;Size, packed&quot; above — and a doubled quote inside such a field is one<br>
+literal quote, which is how the 5&quot; pipe keeps its inch mark. Columns that<br>
+hold nothing but numbers are lined up on the right, so the decimal points<br>
+sit under one another.</p>
+<p>The block stays the data you pasted, so when next month's figures arrive<br>
+you replace the whole thing rather than editing it cell by cell.</p>

@@ -1,0 +1,105 @@
+.TH MD 1 "2026-10-27" "md 1.6.0" "User Commands"
+.SH NAME
+md \- Markdown editor and live previewer
+.SH SYNOPSIS
+.B md
+.RB [ \-\-new\-window ]
+.RI [ file ...]
+.br
+.B md
+.B \-\-version
+.SH DESCRIPTION
+.B md
+is a Markdown editor with a live preview beside the text. A document opens in
+one of three layouts \(em Edit, Split or Preview \(em and is saved in place, in
+the encoding and line endings it came with, one second after the last
+keystroke. The preview draws KaTeX math with mhchem chemistry, Mermaid,
+Graphviz and PlantUML diagrams and highlighted code with bundled open source
+engines, and plots with none. Documents export to PDF, HTML, EPUB, LaTeX and
+TextBundle; a folder of Markdown files can be written and compiled as a book.
+.PP
+md runs as a single instance per session: a second
+.B md
+hands its files to the one already running, which opens each in its own
+window, or brings the window forward if the file is already open, and exits.
+.PP
+Each
+.I file
+may be a Markdown file
+.RI ( .md ,
+.IR .markdown ,
+.IR .mdown ,
+.IR .markdn ,
+.IR .mdtext ,
+.IR .mdtxt ,
+.IR .mkd ,
+.IR .mkdn ,
+.IR .mdwn ,
+.IR .mkdown ),
+a plain text file
+.RI ( .txt ,
+.IR .text ),
+a PlantUML
+.RI ( .puml ,
+.IR .plantuml ,
+.IR .iuml ,
+.IR .pu )
+or Graphviz
+.RI ( .gv )
+diagram, or a TextPack
+.RI ( .textpack )
+or TextBundle folder
+.RI ( .textbundle ),
+which are imported as their text. With no file, md reopens the documents and
+drafts it had open when it last quit, or a new untitled document.
+.SH OPTIONS
+.TP
+.BR \-n ", " \-\-new\-window
+Open a new untitled document window, in the running md if there is one.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the options and exit.
+.SH FILES
+.TP
+.I /usr/share/md/
+The preview engines
+.RI ( rich/ )
+and the examples of the File menu's Examples submenu.
+.TP
+.I ~/.config/md/settings.conf
+Settings: the layout remembered for each recently opened file (by a hash of
+its path), the PDF page size, the book folder and the three typing switches of the Edit menu.
+.TP
+.I ~/.local/state/md/session.json
+The documents and drafts open when md last quit, with their layout and size.
+.TP
+.I ~/.local/share/md/drafts/
+Untitled documents not yet saved, kept until they are saved or discarded.
+.TP
+.I /etc/apparmor.d/md
+The AppArmor profile that lets the preview's sandbox start on Ubuntu.
+.PP
+The folders follow
+.BR XDG_CONFIG_HOME ,
+.B XDG_STATE_HOME
+and
+.B XDG_DATA_HOME
+when they are set. The package removes none of them; they are the user's.
+.SH ENVIRONMENT
+.TP
+.B MD_DATA_DIR
+Read the preview engines and examples from this folder instead of
+.IR /usr/share/md .
+.SH PRIVACY
+md sends nothing anywhere and has no account. It touches the network only to
+fetch an image a document refers to by URL, and the
+.B cover:
+image an EPUB export's front matter names by an https URL. See
+.IR /usr/share/doc/md/PRIVACY.md.gz .
+.SH AUTHOR
+nettrash <nettrash@nettrash.me>
+.SH SEE ALSO
+https://nettrash.me/linux/md/support.html

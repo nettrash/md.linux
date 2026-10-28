@@ -1,0 +1,9 @@
+# The KaTeX faces are the preview's web fonts: katex.min.css loads them through url(fonts/…),
+# relative to the stylesheet, so they must sit beside it in /usr/share/md/rich/fonts. They are not
+# system fonts and fontconfig must not see them (docs/packaging.md §8.2).
+md: font-in-non-font-package [usr/share/md/rich/fonts/*]
+md: font-outside-font-dir [usr/share/md/rich/fonts/*]
+
+# The examples are application data, opened from the File menu's Examples submenu and unpacked by
+# Example Book…; they are not the package's documentation (docs/packaging.md §8.2).
+md: package-contains-documentation-outside-usr-share-doc [usr/share/md/examples/*]

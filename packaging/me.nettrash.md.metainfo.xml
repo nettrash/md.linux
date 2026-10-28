@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>me.nettrash.md</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>md</name>
+  <summary>Write Markdown and see it rendered</summary>
+  <developer id="me.nettrash">
+    <name>nettrash</name>
+  </developer>
+  <description>
+    <p>md is the simplest Markdown editor: write on one side and see the page on the other, or
+      switch to a full-window editor or preview. The same hand-written renderer as md for macOS,
+      iPhone, Android, Windows and VS Code — the same document gives the same page everywhere.</p>
+    <p>Math with KaTeX and mhchem, Mermaid, Graphviz and PlantUML diagrams and highlighted code are
+      drawn on your computer by the bundled open source engines; plots need no engine at all.</p>
+    <ul>
+      <li>Export to PDF at seven page sizes, a self-contained HTML page, EPUB, LaTeX and TextBundle</li>
+      <li>Writer mode: a book is a folder of chapters and articles, compiled to PDF, EPUB or LaTeX</li>
+      <li>Continue lists, capitalize sentences, find and replace, a Format menu, Zen mode</li>
+      <li>Files are saved in place, in the encoding and line endings they came with</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">me.nettrash.md.desktop</launchable>
+  <icon type="stock">me.nettrash.md</icon>
+  <url type="homepage">https://nettrash.me/linux/md/support.html</url>
+  <url type="help">https://nettrash.me/linux/md/support.html</url>
+  <url type="vcs-browser">https://github.com/nettrash/md.linux</url>
+  <categories>
+    <category>Utility</category>
+    <category>TextEditor</category>
+  </categories>
+  <provides>
+    <binary>md</binary>
+    <mediatype>text/markdown</mediatype>
+    <mediatype>text/x-plantuml</mediatype>
+    <mediatype>text/vnd.graphviz</mediatype>
+    <mediatype>application/x-textpack</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <branding>
+    <color type="primary" scheme_preference="light">#F4EFE2</color>
+    <color type="primary" scheme_preference="dark">#241E18</color>
+  </branding>
+  <releases>
+    <release version="1.6.0" date="2026-10-27"/>
+  </releases>
+</component>

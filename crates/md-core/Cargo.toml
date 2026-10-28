@@ -1,0 +1,18 @@
+[package]
+name = "md-core"
+description = "md's parity core: Markdown parser and HTML writer, plots, exports, books, editing rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
