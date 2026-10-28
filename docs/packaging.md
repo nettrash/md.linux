@@ -478,8 +478,9 @@ Docker one. `MD_DEV_NATIVE=1 scripts/dev.sh package` is the same command.
 1. The **copyright file** is the first place the engines' licences are published (§6): agree its
    wording, and the line for `plantuml.js`.
 2. **The icon**: ship the Mac's full-bleed square as is, or a rounded variant for GNOME (§4)?
-3. **Where users get the `.deb`**: a GitHub release asset, nettrash.me, or a PPA later (a PPA would
-   need a source package and debhelper — out of this design's scope).
+3. **Where users get the packages**: GitHub release assets, attached by the release workflow
+   (§13) — while the repository is private, only its collaborators can download them; nettrash.me,
+   or a PPA / COPR later (each would need a source package — out of this design's scope).
 4. **Support and privacy pages** `https://nettrash.me/linux/md/{support,privacy}.html` must exist
    before release (md-logic's `strings::help` already points there; the nettrash-me site repo).
 
@@ -523,3 +524,55 @@ both), GNOME on Wayland, with the user's own account. Tick each line; note the b
     `~/.local/state/md`, `~/.local/share/md` remain (Debian never removes user data).
 14. `sudo apt purge md`: `/etc/apparmor.d/md` and `/etc/apparmor.d/local/md` are gone;
     `dpkg -L md` reports nothing; reinstalling works and finds the user's settings again.
+
+---
+
+## 12. The `.rpm` and the portable `.tar.gz`
+
+Two more packages from the same tree, for systems the `.deb` does not reach.
+
+**`md-<version>-linux-<x86_64|aarch64>.tar.gz`** — written by `scripts/package.sh` beside each `.deb`,
+from the same staged files (§1): the staged `/usr` as `md-<version>/` (`bin/md`, `share/…`), without
+lintian's overrides, plus `packaging/tarball/README` (requirements, running in place, installing
+into `~/.local`) and the AppArmor profile as `share/doc/md/apparmor-profile`, a template for
+Ubuntu 24.04 and later, where the archive's `bin/md` needs its own path in the profile. `bin/md`
+finds its data in `share/md` beside it wherever the folder is (shell-design §9.3). The archive is
+reproducible like the `.deb`: sorted names, `root:root`, every time `SOURCE_DATE_EPOCH`, gzip
+without a name or time. The binary is the Ubuntu 26.04 build: it needs glibc 2.39 or newer and the
+libraries of §8.1 at their floors, which Ubuntu 26.04 and Fedora 44 and later have.
+
+**`md-<version>-1.fc44.<x86_64|aarch64>.rpm`** — `scripts/package-rpm.sh [amd64|arm64 …]`, for
+Fedora 44 and later. It is built natively in Fedora 44 (`docker/Dockerfile.fedora`, the base image
+pinned by digest), the oldest release with every library md is built against (GTK 4.22.5,
+libadwaita 1.9.4, WebKitGTK 6.0 2.54.2, Rust 1.99 on 2026-10-28), so it links Fedora's own
+libraries and `rpmbuild`'s generators write its library Requires. Fedora keeps no archive
+snapshots, so a rebuild may use newer packages than the last one; the build time and file times
+are still `SOURCE_DATE_EPOCH`.
+
+| | `.deb` (§1) | `.rpm` (`packaging/rpm/md.spec`) |
+| --- | --- | --- |
+| Binary, data, desktop entry, MIME types, metainfo, icons | as §1 | the same paths |
+| Manual page, documents | gzipped by the script | gzipped by rpm (the man page); the documents as they are, `%doc` |
+| Licences | `/usr/share/doc/md/copyright` | `/usr/share/licenses/md/copyright`, `%license`; `License:` the SPDX expression of §6 |
+| AppArmor profile | `/etc/apparmor.d/md` | none: Fedora confines with SELinux and does not restrict user namespaces |
+| Caches (MIME, desktop, icons) | dpkg triggers | the file triggers of shared-mime-info, desktop-file-utils and hicolor-icon-theme |
+| Fonts | `fonts-urw-base35`, `fonts-liberation` | `font(nimbusmonops)`, `font(liberationmono)` — what `urw-base35-nimbus-mono-ps-fonts` and `liberation-mono-fonts` provide |
+| Checks before success | §9.3 and lintian | the header, Requires and file list; rpmlint with no error; in a fresh Fedora 44: `dnf install`, `md --version`, `ldd`, the MIME type of every extension (`scripts/package-lib.sh`, shared with §9.3), `desktop-file-validate`, `appstreamcli validate --no-net`, `dnf remove` leaving nothing of md's and all of the user's |
+
+## 13. The release workflow — `.github/workflows/release.yml`
+
+On a pushed `v*` tag (or `workflow_dispatch` with an existing tag):
+
+1. **Tests and self-test** on an amd64 runner: the tag must name `Cargo.toml`'s version (`v1.6` or
+   `v1.6.0` for `1.6.0`), then `scripts/dev.sh image`, `test` and `selftest`.
+2. **Packages**, four jobs: `scripts/package.sh <arch>` (the `.deb` and the `.tar.gz`) and
+   `scripts/package-rpm.sh <arch>` (the `.rpm`) for amd64 and arm64, each with all its checks.
+   arm64 runs on GitHub's arm64 runners when the repository may use them (a public repository),
+   otherwise under QEMU on an amd64 runner — several times slower, the same packages.
+3. **Attach**: the six packages and a `SHA256SUMS` file go to the GitHub release of the tag
+   (`softprops/action-gh-release`, as pgc's release does); the release is created if the tag has
+   none yet, and its title and notes are left to the person who tags.
+
+A push to a branch that touches the packaging (`docker/`, `packaging/`, `scripts/package*.sh`, the
+workflow) runs steps 1 and 2 without step 3, so a broken package shows before the tag.
+

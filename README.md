@@ -205,6 +205,9 @@ every one of them and its licence.
 
 - Ubuntu **26.04 LTS** on **amd64** and **arm64**, GNOME on Wayland first;
   other desktops of 26.04 (on Wayland or X11) through GTK.
+- Fedora **44** and later on **x86_64** and **aarch64** (the `.rpm`), and
+  any distribution with GTK 4.22, libadwaita 1.9, WebKitGTK 6.0 2.52 and
+  glibc 2.39 or newer (the portable `.tar.gz`).
 - The preview's web content runs inside WebKitGTK's sandbox, which needs
   an unprivileged user namespace. Ubuntu 26.04 grants that only to programs
   an AppArmor profile names, so the package installs
@@ -213,15 +216,21 @@ every one of them and its licence.
 
 ## Install
 
+Each release on GitHub carries six packages and a `SHA256SUMS` file.
+
 ```bash
-sudo apt install ./md_1.6.0_amd64.deb     # or md_1.6.0_arm64.deb
+sudo apt install ./md_1.6.0_amd64.deb                # Ubuntu 26.04; or md_1.6.0_arm64.deb
+sudo dnf install ./md-1.6.0-1.fc44.x86_64.rpm        # Fedora 44+;  or .aarch64.rpm
+tar -xzf md-1.6.0-linux-x86_64.tar.gz && md-1.6.0/bin/md   # elsewhere; or -aarch64
 ```
 
 apt brings GTK 4, libadwaita, WebKitGTK and the two font packages from the
 Ubuntu archive. `sudo apt remove md` removes the app and keeps the AppArmor
 profile (a configuration file); `sudo apt purge md` removes that too. Neither
 touches your documents or md's settings, session and drafts in your home
-folder.
+folder. dnf likewise brings the libraries and fonts, and `sudo dnf remove md`
+removes the app. The `.tar.gz` holds a `README` with the libraries to install
+and how to add md to the app grid from `~/.local`.
 
 ## Build
 
@@ -242,10 +251,15 @@ scripts/dev.sh test
 # Run md headless under Xvfb and take a screenshot.
 scripts/dev.sh run
 
-# The .deb: dist/md_1.6.0_<arch>.deb, built and then installed, checked and
+# The .deb and the .tar.gz: dist/md_1.6.0_<arch>.deb and
+# dist/md-1.6.0-linux-<x86_64|aarch64>.tar.gz, the .deb installed, checked and
 # removed again in a fresh ubuntu:26.04 container (amd64 runs under emulation on
 # an arm64 machine). `scripts/dev.sh package` does the same.
 scripts/package.sh amd64 arm64
+
+# The .rpm: dist/md-1.6.0-1.fc44.<x86_64|aarch64>.rpm, built in Fedora 44 and
+# installed, checked and removed again in a fresh one.
+scripts/package-rpm.sh amd64 arm64
 ```
 
 `scripts/package.sh` packages HEAD as committed (`--allow-dirty` packages the
@@ -282,8 +296,9 @@ the `.deb` is byte-identical to the Docker build's.
 | `app` | The GTK 4 / libadwaita / WebKitGTK shell, binary `md`. |
 | `rich/` | The engines, byte-identical to every other md port's copy. |
 | `examples/` | The bundled examples and the Example Book. |
-| `packaging/` | The desktop entry, MIME types, AppStream metadata, icons, AppArmor profile, manual page, copyright and control template of the `.deb`. |
-| `docker/`, `scripts/` | The build image, `dev.sh` (build, test, run, self-test) and `package.sh`. |
+| `packaging/` | The desktop entry, MIME types, AppStream metadata, icons, AppArmor profile, manual page, copyright and control template of the `.deb`; `rpm/md.spec`; the `.tar.gz`'s `README`. |
+| `docker/`, `scripts/` | The Ubuntu and Fedora build images, `dev.sh` (build, test, run, self-test), `package.sh` (`.deb`, `.tar.gz`) and `package-rpm.sh`. |
+| `.github/workflows/release.yml` | On a `v*` tag: the tests, the self-test, and the six packages attached to the release. |
 | `docs/` | The port plan, the measured Linux facts, the shell design, the packaging, and the checklist for a real Ubuntu desktop (`docs/desktop-checklist.md`). |
 
 ## License

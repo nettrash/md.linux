@@ -1,0 +1,145 @@
+# md for Linux — the release (docs/packaging.md §13): on a v* tag, the tests and the self-test, then
+# the .deb, .rpm and .tar.gz for amd64 and arm64, attached with SHA256SUMS to the GitHub release of
+# that tag (created if it does not exist yet).
+#
+# A push to a branch that changes the packaging runs the same jobs without attaching anything, so a
+# broken package shows before the tag. workflow_dispatch runs an existing tag again, to attach after
+# a fix to this file.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    # Path filters are not evaluated for tag pushes: every v* tag runs.
+    branches: ["**"]
+    paths:
+      - ".github/workflows/release.yml"
+      - "docker/**"
+      - "packaging/**"
+      - "scripts/package*.sh"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach (it must already exist)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' && github.event_name == 'push' }}
+
+env:
+  # What is built: the dispatched tag, else the pushed ref.
+  REF: ${{ inputs.tag || github.ref }}
+  # The tag attached to, on a tag push or a dispatch.
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name || '') }}
+
+jobs:
+  test:
+    name: Tests and self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: The tag names Cargo.toml's version
+        if: env.TAG != ''
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+          case "$TAG" in
+            "v$version" | "v${version%.0}") echo "tag $TAG is version $version" ;;
+            *) echo "::error::tag $TAG does not name Cargo.toml's version $version (v$version or v${version%.0})"; exit 1 ;;
+          esac
+
+      - name: The ubuntu:26.04 image
+        run: scripts/dev.sh image
+
+      - name: fmt, clippy and every test
+        run: scripts/dev.sh test
+
+      - name: Self-test
+        run: scripts/dev.sh selftest
+
+      - name: Self-test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest
+          path: dist/selftest
+          if-no-files-found: ignore
+
+  package:
+    name: ${{ matrix.format }} ${{ matrix.arch }}
+    needs: test
+    # arm64 builds on GitHub's arm64 runners where the repository may use them (public ones), else
+    # under QEMU on an amd64 runner: several times slower, the same packages.
+    runs-on: ${{ (matrix.arch == 'arm64' && !github.event.repository.private) && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        format: [deb, rpm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: QEMU for arm64 on an amd64 runner
+        if: matrix.arch == 'arm64' && runner.arch != 'ARM64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: The .deb and the .tar.gz, installed and checked in a fresh Ubuntu 26.04
+        if: matrix.format == 'deb'
+        run: scripts/package.sh ${{ matrix.arch }}
+
+      - name: The .rpm, installed and checked in a fresh Fedora 44
+        if: matrix.format == 'rpm'
+        run: scripts/package-rpm.sh ${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: md-${{ matrix.format }}-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    needs: package
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Six packages and their checksums
+        working-directory: dist
+        run: |
+          ls -la
+          count="$(find . -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' \) | wc -l)"
+          [ "$count" = 6 ] || { echo "::error::expected 6 packages, found $count"; exit 1; }
+          sha256sum -- *.deb *.rpm *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true

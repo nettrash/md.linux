@@ -101,3 +101,8 @@ tracked here.
   WebKitGTK applications. Its copyright file names, for each bundled
   engine, what the file states and which upstream release it is — the first
   time an md edition publishes those statements in its package.
+- **Fedora and the rest.** `md-1.6.0-1.fc44.x86_64.rpm` and `.aarch64.rpm`
+  for Fedora 44 and later, built on Fedora against its own libraries, and a
+  portable `md-1.6.0-linux-x86_64.tar.gz` and `-aarch64.tar.gz` that runs
+  from any folder on a system with the same libraries. A `v*` tag builds,
+  checks and attaches all six packages to its GitHub release.

@@ -1,0 +1,66 @@
+md @VERSION@ for Linux — the portable archive
+=========================================
+
+md is a Markdown editor with a live preview beside the text. This archive
+holds the same files as the .deb and .rpm packages, in one folder:
+
+  bin/md                   the program
+  share/md/                its examples and preview engines; bin/md finds
+                           them here, wherever the folder is
+  share/applications/      the desktop entry
+  share/icons/             the icon, in 13 sizes
+  share/metainfo/          the software-centre description
+  share/mime/packages/     the Markdown, PlantUML, Graphviz and TextPack types
+  share/man/man1/md.1.gz   the manual page
+  share/doc/md/            README, CHANGELOG, PRIVACY, the licences
+                           (copyright) and an AppArmor profile (see below)
+
+Requirements
+------------
+
+The libraries of Ubuntu 26.04 or Fedora 44, or later: GTK 4.22, libadwaita
+1.9, WebKitGTK 6.0 2.52, GLib 2.88 and glibc 2.39 or newer, and the fonts
+Nimbus Mono PS (URW base35) and Liberation Mono. On those systems:
+
+  Ubuntu:  sudo apt install libgtk-4-1 libadwaita-1-0 libwebkitgtk-6.0-4 \
+               fonts-urw-base35 fonts-liberation
+  Fedora:  sudo dnf install gtk4 libadwaita webkitgtk6.0 \
+               urw-base35-nimbus-mono-ps-fonts liberation-mono-fonts
+
+Where the .deb or .rpm fits, prefer it: the package manager brings all of
+this, and on Ubuntu the .deb also installs the AppArmor profile.
+
+Run it
+------
+
+  tar -xzf md-@VERSION@-linux-*.tar.gz
+  md-@VERSION@/bin/md
+
+To install it for yourself, with md in the app grid and offered for Markdown
+files:
+
+  cp -r md-@VERSION@/bin md-@VERSION@/share ~/.local/
+  update-desktop-database ~/.local/share/applications
+  update-mime-database ~/.local/share/mime
+
+and make sure ~/.local/bin is on your PATH. To remove it, delete what was
+copied: ~/.local/bin/md, the rich and examples folders in ~/.local/share/md
+(not the whole folder: md keeps your unsaved drafts in its drafts folder),
+~/.local/share/doc/md, ~/.local/share/man/man1/md.1.gz, and the files named
+me.nettrash.md.* under ~/.local/share.
+
+Ubuntu 24.04 and later
+----------------------
+
+The preview runs in WebKit's sandbox, which needs a user namespace, and
+Ubuntu lets a program create one only when an AppArmor profile allows it. The
+.deb installs that profile for /usr/bin/md. For this archive, copy
+share/doc/md/apparmor-profile to /etc/apparmor.d/md, change /usr/bin/md in
+it to the full path of bin/md, and load it:
+
+  sudo apparmor_parser -r /etc/apparmor.d/md
+
+If the sandbox cannot start, md says so and quits; it never runs the preview
+without it.
+
+https://nettrash.me/linux/md/support.html

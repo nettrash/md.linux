@@ -20,7 +20,8 @@
 #   3. in md-linux-dev:<arch>: cargo build --release --locked -p md, stages docs/packaging.md §1
 #      in a volume and computes Depends (§8.1) and the control data; then, in md-linux-dev of the
 #      machine's own architecture, builds dist/md_<version>_<arch>.deb with dpkg-deb and checks
-#      its info and contents against §1 (see deb_inside for why dpkg-deb runs natively);
+#      its info and contents against §1 (see deb_inside for why dpkg-deb runs natively), and from
+#      the same files the portable dist/md-<version>-linux-<x86_64|aarch64>.tar.gz (§12);
 #   4. in a fresh ubuntu:26.04 of the same architecture (§9.3): apt installs the .deb from the
 #      live archive, runs md --version, the MIME mapping of every extension, desktop-file-validate,
 #      appstreamcli validate --no-net, an AppArmor parse of the profile, then apt remove and purge,
@@ -46,6 +47,8 @@ PKG=md
 
 say() { printf '%s\n' "package: $*" >&2; }
 die() { say "FAILED: $*"; exit 1; }
+# shellcheck source=scripts/package-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/package-lib.sh"
 
 # Where the steps find the source, the staging area, the output, the target directory and the
 # cargo home: the containers' mounts, unless --native points them at this machine.
@@ -86,10 +89,8 @@ build_inside() {
 
     # Reproducible: fixed paths in the binary (the containers' ones, wherever it is built), no debug
     # info, symbols stripped, one codegen unit (the workspace's [profile.release]); the selftest
-    # feature is never built into the package. The flags go in encoded, one per \x1f, so a path
-    # with a space survives, and they replace any RUSTFLAGS or build.rustflags of the machine's.
-    local sep=$'\x1f'
-    export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$SRC=/build/md$sep--remap-path-prefix=$CARGO_DIR=/cargo$sep--remap-path-prefix=$TARGET=/build/target"
+    # feature is never built into the package.
+    export_rustflags "$SRC" "$CARGO_DIR" "$TARGET"
     export CARGO_TARGET_DIR="$TARGET" CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_DEBUG=false
     say "cargo build --release --locked -p md ($arch)"
     cargo build --release --locked -p md
@@ -171,9 +172,49 @@ deb_inside() {
     # depend on how many CPUs the building machine has.
     dpkg-deb --root-owner-group --threads-max=1 -Zxz -z9 --build "$stage" "$deb" >/dev/null
     check_layout "$deb" "$version" "$arch" "$depends"
-    rm -rf "$stage" "$STAGE/depends"
     say "built $(basename "$deb"): $(stat -c %s "$deb") bytes"
     (cd "$OUT" && sha256sum "$(basename "$deb")")
+    make_tarball "$stage" "$version" "$arch"
+    rm -rf "$stage" "$STAGE/depends"
+}
+
+# The portable archive md-<version>-linux-<x86_64|aarch64>.tar.gz (docs/packaging.md §12): the
+# staged /usr as md-<version>/, whose bin/md finds share/md beside it (shell-design §9.3), without
+# lintian's overrides, plus packaging/tarball/README and the AppArmor profile as a template.
+# Reproducible like the .deb: sorted names, root-owned, SOURCE_DATE_EPOCH, gzip without a name.
+make_tarball() {
+    local stage="$1" version="$2" arch="$3" machine name tmp tarball status=0 listing want
+    case "$arch" in amd64) machine=x86_64 ;; arm64) machine=aarch64 ;; *) die "no tarball name for $arch" ;; esac
+    name="$PKG-$version"
+    tarball="$OUT/$PKG-$version-linux-$machine.tar.gz"
+    tmp="$(mktemp -d /tmp/md-tarball.XXXXXX)"
+    cp -a "$stage/usr" "$tmp/$name"
+    rm -rf "$tmp/$name/share/lintian"
+    sed "s/@VERSION@/$version/g" packaging/tarball/README > "$tmp/$name/README"
+    install -m 0644 packaging/apparmor/md "$tmp/$name/share/doc/md/apparmor-profile"
+    chmod 0644 "$tmp/$name/README"
+    find "$tmp" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+    rm -f "$tarball"
+    tar --sort=name --format=gnu --owner=root:0 --group=root:0 -C "$tmp" -cf - "$name" |
+        gzip -9n > "$tarball"
+    rm -rf "$tmp"
+
+    listing="$(tar -tzvf "$tarball")"
+    for want in bin/md README share/md/rich/md-init.js share/md/examples/01-Welcome.md \
+        "share/md/examples/Example Book/01-Preface.md" share/applications/me.nettrash.md.desktop \
+        share/metainfo/me.nettrash.md.metainfo.xml share/mime/packages/me.nettrash.md.xml \
+        share/man/man1/md.1.gz share/doc/md/copyright share/doc/md/apparmor-profile; do
+        printf '%s\n' "$listing" | grep -qF " $name/$want" || { say "tarball: no $name/$want"; status=1; }
+    done
+    printf '%s\n' "$listing" | grep -qE "^-rwxr-xr-x root/root .* $name/bin/md\$" ||
+        { say "tarball: bin/md is not an executable owned by root"; status=1; }
+    [ "$(printf '%s\n' "$listing" | grep -c " $name/share/icons/hicolor/.*/apps/me\.nettrash\.md\.png\$")" = 13 ] ||
+        { say "tarball: not 13 icon sizes"; status=1; }
+    printf '%s\n' "$listing" | grep -qE " $name/(share/lintian|DEBIAN|etc)/?" &&
+        { say "tarball: holds a Debian-only file"; status=1; }
+    [ "$status" = 0 ] || die "$(basename "$tarball") is not as docs/packaging.md §12 describes"
+    say "built $(basename "$tarball"): $(stat -c %s "$tarball") bytes"
+    (cd "$OUT" && sha256sum "$(basename "$tarball")")
 }
 
 # Every crate the binary links (normal edges, no proc macros: their code runs at compile time)
@@ -348,53 +389,8 @@ check_inside() {
         ok "apparmor_parser compiles /etc/apparmor.d/md"
     else cat /tmp/aa.log >&2; fail "apparmor_parser rejects /etc/apparmor.d/md"; fi
 
-    # MIME: one file of every extension, typed by GIO as GNOME Files types it (xdg-mime asks gio on
-    # GNOME). Not refreshed by hand: shared-mime-info's dpkg trigger must already have run.
-    export XDG_CURRENT_DESKTOP=GNOME GIO_USE_VFS=local
-    local dir=/tmp/md-mime ext want got
-    mkdir -p "$dir/pack"
-    printf '# Title\n\nSome *text*.\n' > "$dir/pack/text.md"
-    (cd "$dir/pack" && zip -q -X ../a.textpack text.md)
-    while read -r ext want; do
-        case "$ext" in
-            textpack) ;;
-            puml | plantuml | iuml | pu) printf '@startuml\nAlice -> Bob: hello\n@enduml\n' > "$dir/a.$ext" ;;
-            gv) printf 'digraph g {\n  a -> b;\n}\n' > "$dir/a.$ext" ;;
-            txt | text) printf 'Plain text.\n' > "$dir/a.$ext" ;;
-            *) printf '# Title\n\nSome *text*.\n' > "$dir/a.$ext" ;;
-        esac
-        got="$(xdg-mime query filetype "$dir/a.$ext" 2>&1)"
-        if [ "$got" = "$want" ]; then ok "xdg-mime query filetype a.$ext = $got"
-        else fail "a.$ext is '$got', want $want"; fi
-    done <<EOF
-md text/markdown
-markdown text/markdown
-mdown text/markdown
-markdn text/markdown
-mdtext text/markdown
-mdtxt text/markdown
-mkd text/markdown
-mkdn text/markdown
-mdwn text/markdown
-mkdown text/markdown
-txt text/plain
-text text/plain
-puml text/x-plantuml
-plantuml text/x-plantuml
-iuml text/x-plantuml
-pu text/x-plantuml
-gv text/vnd.graphviz
-textpack application/x-textpack
-EOF
-    local t
-    for t in text/markdown text/plain text/x-plantuml text/vnd.graphviz application/x-textpack; do
-        if grep -q "^$t=.*me\.nettrash\.md\.desktop" /usr/share/applications/mimeinfo.cache; then
-            ok "mimeinfo.cache offers md for $t"; else fail "mimeinfo.cache does not offer md for $t"; fi
-    done
-    got="$(xdg-mime query default text/markdown)"
-    [ "$got" = me.nettrash.md.desktop ] && ok "xdg-mime query default text/markdown = $got" ||
-        fail "default for text/markdown is '$got'"
-
+    local dir=/tmp/md-mime got
+    check_mime_types "$dir"
     local out
     out="$(desktop-file-validate /usr/share/applications/me.nettrash.md.desktop 2>&1)" || true
     if [ -z "$out" ]; then ok "desktop-file-validate: clean"; else printf '%s\n' "$out" >&2
@@ -543,17 +539,7 @@ export SOURCE_DATE_EPOCH
 export_dir="$ROOT/dist/.package-source"
 rm -rf "$export_dir"
 mkdir -p "$export_dir"
-if [ -z "$(git -C "$ROOT" status --porcelain)" ]; then
-    git -C "$ROOT" archive --format=tar HEAD | tar -x -C "$export_dir"
-    say "source: HEAD $(git -C "$ROOT" rev-parse --short HEAD), SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
-elif [ "$allow_dirty" = 1 ]; then
-    (cd "$ROOT" && git ls-files -z --cached --others --exclude-standard |
-        while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done |
-        tar --null -T - -cf -) | tar -x -C "$export_dir"
-    say "source: the working tree with uncommitted changes (--allow-dirty), SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH of HEAD"
-else
-    die "the working tree has uncommitted changes: commit them, or pass --allow-dirty"
-fi
+export_source "$ROOT" "$export_dir" "$allow_dirty"
 mkdir -p "$ROOT/dist"
 
 # --native: step 3 on this machine, then lintian (step 4's other checks install the package).
