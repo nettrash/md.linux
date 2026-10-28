@@ -307,8 +307,9 @@ EOF
         { say "control members: $members"; status=1; }
 
     # Every entry root:root, mtime SOURCE_DATE_EPOCH, mode 0755 for directories, the binary and
-    # nothing else, 0644 for every other file.
-    dpkg-deb --contents "$deb" > "$tmp/contents"
+    # nothing else, 0644 for every other file. tar lists the times in the local zone, so in UTC like
+    # the stamp: a desktop's own zone (--native) would shift every one of them.
+    TZ=UTC0 dpkg-deb --contents "$deb" > "$tmp/contents"
     local stamp
     stamp="$(date -u -d "@$SOURCE_DATE_EPOCH" '+%Y-%m-%d %H:%M')"
     awk -v stamp="$stamp" '
